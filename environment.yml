@@ -1,0 +1,16 @@
+# The environment lives in the project root, as ./gopt_env
+#
+#   conda env create -f environment.yml -p ./gopt_env
+#   conda activate ./gopt_env
+#
+# The engine itself is pure standard library. Streamlit is here only for the
+# dashboards. Backtests are not run in this environment: run_one shells out to
+# whichever interpreter the backtest engine needs.
+name: global_opt_engine
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+      - streamlit

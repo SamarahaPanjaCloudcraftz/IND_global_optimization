@@ -1,0 +1,1385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Margin Allocation Desk</title>
+<script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@1.0.3/dist/solver.global.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#0e1117; --panel:#151a23; --panel-2:#1b212c; --line:#252c38;
+  --text:#e6e9ef; --text-dim:#8891a3; --accent:#e8a33d; --accent-2:#5b9dd9;
+  --good:#4fae7c; --warn:#d9713c; --bad:#d1495b;
+  --mono:'IBM Plex Mono','SF Mono',Consolas,monospace;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+:root:not([data-theme="light"]){ color-scheme: dark; }
+:root[data-theme="light"]{
+  --bg:#f5f4f0; --panel:#ffffff; --panel-2:#faf9f6; --line:#e0ddd4;
+  --text:#1c1c1a; --text-dim:#6b6b63; --accent:#b5721f; --accent-2:#2f6fa8;
+  --good:#2f8f5c; --warn:#b5581f; --bad:#b53347; color-scheme: light;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f5f4f0; --panel:#ffffff; --panel-2:#faf9f6; --line:#e0ddd4;
+    --text:#1c1c1a; --text-dim:#6b6b63; --accent:#b5721f; --accent-2:#2f6fa8;
+    --good:#2f8f5c; --warn:#b5581f; --bad:#b53347; color-scheme: light;
+  }
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;overflow-x:auto;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5;padding:24px 20px 80px;}
+.wrap{max-width:1280px;margin:0 auto;}
+
+header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;flex-wrap:wrap;gap:8px;}
+h1{font-family:var(--mono);font-size:20px;font-weight:600;letter-spacing:-0.01em;margin:0;}
+h1 span{color:var(--accent);}
+.subtitle{color:var(--text-dim);font-size:12.5px;margin:0 0 18px;}
+.theme-toggle{font-family:var(--mono);font-size:11px;background:none;border:1px solid var(--line);color:var(--text-dim);padding:5px 10px;border-radius:4px;cursor:pointer;}
+.theme-toggle:hover{border-color:var(--accent);color:var(--accent);}
+
+.tabbar{display:flex;gap:6px;margin-bottom:18px;border-bottom:1px solid var(--line);}
+.tabbtn{font-family:var(--mono);font-size:12.5px;background:none;border:none;color:var(--text-dim);padding:9px 16px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
+.tabbtn.active{color:var(--accent);border-bottom-color:var(--accent);}
+.tabbtn:hover:not(.active){color:var(--text);}
+.tabpanel{display:none;}
+.tabpanel.active{display:block;}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:16px 18px;margin-bottom:20px;overflow-x:auto;}
+.panel h2{font-size:11px;color:var(--text-dim);margin:0 0 14px;font-weight:600;border-bottom:1px solid var(--line);padding-bottom:8px;}
+
+.field-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;max-width:420px;}
+.field-row:last-child{margin-bottom:0;}
+.field-row label{color:var(--text-dim);font-size:12.5px;}
+.field-row input[type=number], .field-row select{
+  background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+  font-family:var(--mono);font-size:13px;padding:5px 8px;border-radius:4px;width:150px;text-align:right;
+}
+.field-row select{text-align:left;width:110px;}
+.calendar-fields{display:flex;flex-wrap:wrap;gap:24px;}
+
+.segmented{display:inline-flex;gap:4px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:4px;}
+.seg-btn{font-family:var(--mono);font-size:12px;background:none;border:none;color:var(--text-dim);padding:7px 12px;border-radius:4px;cursor:pointer;white-space:nowrap;}
+.seg-btn.active{background:var(--accent);color:var(--bg);}
+.seg-btn:disabled{opacity:0.35;cursor:not-allowed;}
+.setup-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;}
+@media (max-width:820px){.setup-grid{grid-template-columns:1fr;}}
+.setup-block{margin-bottom:16px;}
+.setup-block:last-child{margin-bottom:0;}
+.setup-label{font-size:11.5px;color:var(--text-dim);margin-bottom:8px;}
+.notice{font-size:11.5px;color:var(--accent);margin-top:8px;}
+.solve-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid var(--line);}
+.solve-btn{font-family:var(--mono);font-size:13px;font-weight:600;background:var(--accent);color:var(--bg);border:none;padding:9px 20px;border-radius:5px;cursor:pointer;}
+.solve-btn:hover{opacity:0.9;}
+.status-badge{font-family:var(--mono);font-size:11.5px;padding:4px 10px;border-radius:4px;border:1px solid var(--line);color:var(--text-dim);}
+.status-badge.ok{color:var(--good);border-color:var(--good);}
+.status-badge.bad{color:var(--bad);border-color:var(--bad);}
+
+.idxcap-grid{display:flex;gap:24px;flex-wrap:wrap;}
+.idxcap-field{display:flex;flex-direction:column;gap:4px;}
+.idxcap-field label{font-size:11px;color:var(--text-dim);}
+.idxcap-field input{background:var(--panel-2);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:13px;padding:5px 8px;border-radius:4px;width:140px;}
+
+
+table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px;}
+.table-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px;}
+th,td{padding:8px 9px;border-bottom:1px solid var(--line);white-space:nowrap;}
+th{text-align:right;color:var(--text-dim);font-weight:600;font-size:11px;background:var(--panel-2);position:sticky;top:0;cursor:help;}
+th:first-child, td:first-child{text-align:left;position:sticky;left:0;background:var(--panel);z-index:1;}
+td{text-align:right;}
+tbody tr:hover td{background:var(--panel-2);}
+.riskcol{display:none;}
+.riskcol.show{display:table-cell;}
+.dtecol{display:none;}
+.dtecol.show{display:table-cell;}
+.indepcol{display:none;}
+.indepcol.show{display:table-cell;}
+
+input.cell{width:82px;background:transparent;border:1px solid transparent;color:var(--text);font-family:var(--mono);font-size:12.5px;text-align:right;padding:3px 4px;border-radius:3px;}
+input.cell:hover{border-color:var(--line);}
+input.cell:focus{outline:none;border-color:var(--accent);background:var(--panel-2);}
+input.margin-string{width:170px;text-align:left;}
+input.name-input{width:110px;text-align:left;background:transparent;border:1px solid transparent;color:var(--text);font-family:var(--sans);font-size:13px;padding:3px 4px;border-radius:3px;}
+input.name-input:hover{border-color:var(--line);}
+input.name-input:focus{outline:none;border-color:var(--accent);background:var(--panel-2);}
+input.units-cell{width:56px;background:transparent;border:1px solid transparent;color:var(--text);font-family:var(--mono);font-size:12.5px;text-align:right;padding:3px 4px;border-radius:3px;}
+input.units-cell:hover{border-color:var(--line);}
+input.units-cell:focus{outline:none;border-color:var(--accent);background:var(--panel-2);}
+
+select.idx-select, select.type-select, select.bool-select{background:transparent;border:1px solid transparent;color:var(--text-dim);font-family:var(--mono);font-size:11.5px;padding:2px;border-radius:3px;}
+select.idx-select:hover, select.type-select:hover, select.bool-select:hover{border-color:var(--line);}
+select.type-select:disabled{opacity:0.5;}
+
+.remove-btn{background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;opacity:0.5;}
+.remove-btn:hover{opacity:1;color:var(--bad);}
+
+.total-row td{font-weight:700;border-top:2px solid var(--line);border-bottom:none;background:var(--panel-2);color:var(--text);}
+.util-row td{background:var(--panel-2);border-bottom:2px solid var(--line);}
+.util-cell{display:flex;flex-direction:column;align-items:flex-end;gap:3px;}
+.util-num{font-weight:700;}
+.util-bar-track{width:100%;height:4px;background:var(--line);border-radius:2px;overflow:hidden;}
+.util-bar-fill{height:100%;border-radius:2px;}
+
+.table-actions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;align-items:center;}
+.add-row-btn, .upload-btn{background:none;border:1px dashed var(--line);color:var(--text-dim);font-family:var(--mono);font-size:12px;padding:8px 14px;border-radius:5px;cursor:pointer;}
+.add-row-btn:hover, .upload-btn:hover{border-color:var(--accent);color:var(--accent);}
+.upload-btn input[type=file]{display:none;}
+.upload-note{color:var(--text-dim);font-size:11px;}
+
+
+.heur-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;}
+@media (max-width:600px){.heur-grid{grid-template-columns:1fr;}}
+.heur-result{background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:14px;font-family:var(--mono);}
+.heur-result .big{font-size:26px;font-weight:700;color:var(--accent);}
+.heur-result .ratio{color:var(--text-dim);font-size:12px;margin-top:4px;}
+.heur-note{font-size:11.5px;color:var(--text-dim);margin-top:12px;line-height:1.6;border-top:1px solid var(--line);padding-top:12px;}
+.curve svg{width:100%;height:100px;display:block;}
+
+.summary-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px;}
+@media (max-width:700px){.summary-cards{grid-template-columns:1fr;}}
+.summary-card{background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:12px 14px;}
+.summary-card .label{font-size:11px;color:var(--text-dim);margin-bottom:4px;}
+.summary-card .value{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--accent);}
+.delta-pos{color:var(--good);}
+.delta-neg{color:var(--bad);}
+.empty-state{color:var(--text-dim);font-size:13px;padding:30px 10px;text-align:center;border:1px dashed var(--line);border-radius:6px;}
+
+pre.formulation{font-family:var(--mono);font-size:12px;line-height:1.75;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;padding:16px 18px;overflow-x:auto;white-space:pre;color:var(--text);}
+
+.info-icon{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:15px;height:15px;border-radius:50%;border:1px solid var(--text-dim);
+  color:var(--text-dim);font-size:10px;font-family:var(--mono);cursor:help;
+  margin-left:5px;vertical-align:middle;user-select:none;flex-shrink:0;
+}
+.info-icon:hover, .info-icon.open{border-color:var(--accent);color:var(--accent);}
+th .info-icon{margin-left:4px;}
+
+.global-tooltip{
+  position:fixed;display:none;max-width:230px;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:6px;padding:9px 11px;font-size:11.5px;line-height:1.55;color:var(--text);
+  font-family:var(--sans);font-weight:400;white-space:normal;text-align:left;
+  z-index:9999;box-shadow:0 6px 16px rgba(0,0,0,0.25);pointer-events:none;
+}
+.global-tooltip.show{display:block;}
+
+.toast{
+  position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
+  background:var(--panel-2);border:1px solid var(--line);color:var(--text);
+  padding:10px 16px;border-radius:6px;font-size:12.5px;font-family:var(--sans);
+  box-shadow:0 6px 20px rgba(0,0,0,0.3);z-index:9999;opacity:0;pointer-events:none;
+  transition:opacity 0.2s ease;max-width:320px;text-align:center;
+}
+.toast.show{opacity:1;}
+.toast.error{border-color:var(--bad);}
+
+
+.panel h2{display:flex;align-items:center;flex-wrap:wrap;}
+.panel-collapse-toggle{
+  background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:10px;
+  padding:0 7px 0 0;line-height:1;flex-shrink:0;font-family:var(--mono);
+}
+.panel-collapse-toggle:hover{color:var(--accent);}
+.panel.collapsed{padding-bottom:16px;}
+.panel.collapsed .panel-body{display:none;}
+.panel.collapsed h2{margin-bottom:0;border-bottom:none;padding-bottom:0;}
+
+footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="global-tooltip" id="globalTooltip"></div>
+<div class="toast" id="toast"></div>
+
+
+<header>
+  <h1>margin<span>alloc</span>desk</h1>
+  <div style="display:flex;gap:8px;">
+    <button class="theme-toggle" id="unitToggle">units: $</button>
+    <button class="theme-toggle" id="themeToggle">toggle theme</button>
+  </div>
+</header>
+<p class="subtitle">Weekly/monthly margin footprint by strategy · expiry-day multiplier applied automatically · solver finds the optimal dollar allocation</p>
+
+<div class="tabbar">
+  <button class="tabbtn active" data-tab="workbench">Workbench</button>
+  <button class="tabbtn" data-tab="dte">DTE Scaling</button>
+</div>
+
+<!-- ============ WORKBENCH TAB ============ -->
+<div class="tabpanel active" id="tab-workbench">
+
+<div class="panel">
+  <h2>capital &amp; calendar
+    <span class="info-icon" data-tip="These are pre-filled to today's actual exchange schedule: NIFTY expires Tuesday, BANK NIFTY (monthly only) expires Tuesday, SENSEX expires Thursday. Change them if your broker or segment is different.">?</span>
+  </h2>
+  <div class="calendar-fields">
+    <div>
+      <div class="field-row">
+        <label>Total margin capital ($)</label>
+        <input type="number" id="totalCapital" autocomplete="off" value="10000000" step="100000">
+      </div>
+      <div class="field-row">
+        <label>NIFTY (NF) expiry weekday</label>
+        <select id="nfExpiry" autocomplete="off">
+          <option value="mon">Mon</option><option value="tue" selected>Tue</option>
+          <option value="wed">Wed</option><option value="thu">Thu</option><option value="fri">Fri</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <label>BANK NIFTY (BN) expiry weekday</label>
+        <select id="bnExpiry" autocomplete="off">
+          <option value="mon">Mon</option><option value="tue" selected>Tue</option>
+          <option value="wed">Wed</option><option value="thu">Thu</option><option value="fri">Fri</option>
+        </select>
+      </div>
+    </div>
+    <div>
+      <div class="field-row">
+        <label>SENSEX (SN) expiry weekday</label>
+        <select id="snExpiry" autocomplete="off">
+          <option value="mon">Mon</option><option value="tue">Tue</option>
+          <option value="wed">Wed</option><option value="thu" selected>Thu</option><option value="fri">Fri</option>
+        </select>
+      </div>
+      <div class="field-row" id="monthlyExpiryWeekRow" style="display:none;">
+        <label>Monthly expiry falls in week #</label>
+        <select id="monthlyExpiryWeek" autocomplete="off">
+          <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option>
+        </select>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>optimization setup</h2>
+  <div class="setup-grid">
+    <div class="setup-block">
+      <div class="setup-label">Horizon
+        <span class="info-icon" data-tip="Weekly: plan one week. Monthly: plan four weeks at once, so a strategy that stays open for a whole month can be sized properly. If any strategy is set to &quot;monthly,&quot; Weekly gets locked out automatically.">?</span>
+      </div>
+      <div class="segmented">
+        <button class="seg-btn active" id="horizonWeeklyBtn" data-horizon="weekly">Weekly</button>
+        <button class="seg-btn" id="horizonMonthlyBtn" data-horizon="monthly">Monthly</button>
+      </div>
+      <div class="notice" id="horizonNotice" style="display:none;"></div>
+    </div>
+    <div class="setup-block">
+      <div class="setup-label">Objective</div>
+      <div class="segmented">
+        <button class="seg-btn active" data-obj="total" id="objTotalBtn">Total utilization<span class="info-icon" data-tip="Use as much of your margin as possible across the week. May load some days heavily and leave others light.">?</span></button>
+        <button class="seg-btn" data-obj="maximin" id="objMaximinBtn">Worst-day utilization<span class="info-icon" data-tip="Spread the load evenly, so no single day ends up badly underused or overloaded compared to the rest.">?</span></button>
+        <button class="seg-btn" data-obj="riskadj" id="objRiskBtn">Risk-adjusted return<span class="info-icon" data-tip="Aim for the best return for the risk taken, using the expected return and risk numbers you enter per strategy — as dollar amounts (not %) for one full run of the strategy, over the period matching your horizon (a week, or the whole month).">?</span></button>
+      </div>
+      <div id="lambdaRow" class="field-row" style="display:none;margin-top:10px;max-width:280px;">
+        <label>Risk aversion λ</label>
+        <input type="number" id="riskLambda" autocomplete="off" value="1" step="0.1">
+      </div>
+      <div class="notice" id="riskNotice" style="display:none;">Expected return &amp; risk columns are now shown in the strategy table below.</div>
+    </div>
+  </div>
+
+  <div class="setup-block" style="margin-top:18px;">
+    <div class="setup-label">Margin floor &amp; ceiling — whole book
+      <span class="info-icon" data-tip="Optional. Force the solver to use at least this much total margin on every day, in addition to the capital ceiling it already respects. Leave blank for no floor.">?</span>
+    </div>
+    <div class="idxcap-grid">
+      <div class="idxcap-field"><label>Min margin used — total ($)</label><input type="number" id="minTotalMargin" autocomplete="off" step="10000" placeholder="no min"></div>
+    </div>
+  </div>
+
+  <div class="setup-block" style="margin-top:18px;">
+    <div class="setup-label">Per-index margin floor &amp; ceiling
+      <span class="info-icon" data-tip="Optional. Set a dollar floor and/or ceiling on how much margin any one index (NF/BN/SN) uses on a given day, across all its strategies combined. Leave blank for no limit.">?</span>
+    </div>
+    <div class="idxcap-grid">
+      <div class="idxcap-field"><label>NF — min / max ($)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="number" id="minNF" autocomplete="off" step="10000" placeholder="no min" style="width:100px;">
+          <input type="number" id="capNF" autocomplete="off" step="10000" placeholder="no cap" style="width:100px;">
+        </div>
+      </div>
+      <div class="idxcap-field"><label>BN — min / max ($)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="number" id="minBN" autocomplete="off" step="10000" placeholder="no min" style="width:100px;">
+          <input type="number" id="capBN" autocomplete="off" step="10000" placeholder="no cap" style="width:100px;">
+        </div>
+      </div>
+      <div class="idxcap-field"><label>SN — min / max ($)</label>
+        <div style="display:flex;gap:6px;">
+          <input type="number" id="minSN" autocomplete="off" step="10000" placeholder="no min" style="width:100px;">
+          <input type="number" id="capSN" autocomplete="off" step="10000" placeholder="no cap" style="width:100px;">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="solve-row">
+    <button class="solve-btn" id="solveBtn">Solve MILP</button>
+    <span class="status-badge" id="statusBadge">not solved yet</span>
+  </div>
+</div>
+
+<div class="panel">
+  <h2 style="gap:10px;">
+    <span style="flex:1;">strategies</span>
+    <div class="segmented" style="margin-left:auto;">
+      <button class="seg-btn active" id="marginModeDteBtn" data-mode="dte">Derive from DTE curve</button>
+      <button class="seg-btn" id="marginModeIndepBtn" data-mode="independent">Independent by weekday</button>
+    </div>
+    <span class="info-icon" data-tip="Derive from DTE curve: enter lots per weekday + a margin @0DTE, and every day's margin is worked out from the DTE curve. Independent by weekday: skip the curve entirely and type the actual $ margin for each weekday directly — five separate numbers with no formula tying them together. Switching doesn't erase the other mode's numbers, so you can flip back.">?</span>
+  </h2>
+  <div class="table-scroll">
+  <table id="stratTable">
+    <thead>
+      <tr>
+        <th style="text-align:left;">strategy</th>
+        <th style="text-align:left;">index<span class="info-icon" data-tip="Which index this strategy trades. Sets its expiry day and which index-level cap it counts against.">?</span></th>
+        <th>overnight<span class="info-icon" data-tip="Does the position stay open past today's close? This decides which &quot;type&quot; values you can pick.">?</span></th>
+        <th style="text-align:left;">type<span class="info-icon" data-tip="Daily and weekly strategies double their margin every time the expiry day comes around. Monthly strategies only double in the one week you've marked as the expiry week.">?</span></th>
+        <th>current margin ($)<span class="info-icon" data-tip="What you actually have deployed today on this strategy's heaviest day. Just for comparison — the solver doesn't use this number.">?</span></th>
+        <th>min $/strat<span class="info-icon" data-tip="The least this strategy must use in margin every day, if it's run at all. Leave blank for no floor.">?</span></th>
+        <th>max $/strat<span class="info-icon" data-tip="The most this strategy alone is allowed to use in margin on any single day. Leave blank for no limit.">?</span></th>
+        <th class="dtecol show" style="text-align:left;">lots (m,t,w,t,f)<span class="info-icon" data-tip="Lots held each weekday, e.g. &quot;12111&quot; means 1 lot Monday, 2 Tuesday, 1 the rest of the week.">?</span></th>
+        <th class="dtecol show">margin @0DTE<span class="info-icon" data-tip="Margin for one lot on its expiry day. Every other weekday's margin is worked out from this automatically.">?</span></th>
+        <th class="indepcol" style="text-align:left;">margin by weekday ($, m/t/w/t/f)<span class="info-icon" data-tip="Five independent dollar figures, one per weekday, comma-separated — no formula, no shared curve. The expiry-day ×2 multiplier still applies on top of whatever you enter here.">?</span></th>
+        <th class="riskcol"><span id="expReturnLabel">exp. return</span><span class="info-icon" data-tip="Only used when the objective is &quot;Risk-adjusted return&quot;. Must be a dollar amount (not a %), for one full run of this strategy at scale 1 — over one week if horizon is Weekly, or the whole month if horizon is Monthly.">?</span></th>
+        <th class="riskcol"><span id="riskLabel">risk</span><span class="info-icon" data-tip="Only used when the objective is &quot;Risk-adjusted return&quot;. Same units and same period as expected return — a dollar risk (e.g. standard deviation of P&amp;L), not a %.">?</span></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="stratBody"></tbody>
+  </table>
+  </div>
+  <div id="emptyTableMsg" class="empty-state" style="margin-top:12px;">No strategies yet — add a row, or upload a file below.</div>
+  <div class="table-actions">
+    <button class="add-row-btn" id="addRow">+ add strategy row</button>
+    <label class="upload-btn">
+      ⭱ upload .xlsx / .csv
+      <input type="file" id="fileUpload" accept=".xlsx,.xls,.csv">
+    </label>
+    <button class="add-row-btn" id="downloadSample">⭳ download sample .xlsx</button>
+    <span class="info-icon" data-tip="Your file needs these column headers: strategy, index, overnight, type, current_margin, min_margin, max_margin, lots (like 12111), margin_0dte. Add expected_return and risk too if you're using the risk-adjusted objective. For 'Independent by weekday' mode, add margin_mon, margin_tue, margin_wed, margin_thu, margin_fri instead.">?</span>
+  </div>
+  <div class="table-actions" style="margin-top:6px;">
+    <button class="add-row-btn" id="loadSample">load sample strategies (NF/BN/SN × monthly + non-monthly)</button>
+    <button class="add-row-btn" id="resetStrats" style="border-color:var(--bad);color:var(--bad);">reset strategies</button>
+  </div>
+</div>
+
+<div class="panel" id="weekTypeReportPanel">
+  <h2 style="gap:10px;">
+    <span style="flex:1;">margin by strategy and day
+      <span class="info-icon" data-tip="Shows margin broken out per strategy, plus the total and utilization across all of them. Under monthly horizon, every ordinary week looks the same, so use the toggle to switch between an ordinary week and the one expiry week instead of scrolling through 20 separate weeks.">?</span>
+    </span>
+    <div id="weekTypeToggle" class="segmented" style="display:none;margin-left:auto;">
+      <button class="seg-btn active" id="weekTypeNonExpBtn" data-weektype="nonexp">Non-expiry week</button>
+      <button class="seg-btn" id="weekTypeExpBtn" data-weektype="exp">Expiry week</button>
+    </div>
+    <select id="reportMode" autocomplete="off" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:5px;">
+      <option value="current">Current allocation</option>
+      <option value="optimal">Optimal allocation (last solve)</option>
+    </select>
+  </h2>
+  <div id="reportEmptyMsg" class="empty-state" style="display:none;">Run "Solve MILP" above first — there's no optimal allocation to show yet.</div>
+  <div class="table-scroll" id="reportTableWrap">
+  <table>
+    <thead><tr><th style="text-align:left;">strategy / metric</th><th>mon</th><th>tue</th><th>wed</th><th>thu</th><th>fri</th></tr></thead>
+    <tbody id="weekTypeReportBody"></tbody>
+  </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>problem formulation</h2>
+  <pre class="formulation" id="formulationBlock"></pre>
+</div>
+
+<div id="solverEmpty" class="empty-state">Add strategies above, then hit "Solve MILP" to see the optimal dollar allocation here.</div>
+
+<div id="solverOutput" style="display:none;">
+  <div class="summary-cards">
+    <div class="summary-card"><div class="label">objective value</div><div class="value" id="objValue">—</div></div>
+    <div class="summary-card"><div class="label">avg utilization (current → optimal)</div><div class="value" id="avgUtilCompare">—</div></div>
+    <div class="summary-card"><div class="label">solve time</div><div class="value" id="solveTime">—</div></div>
+  </div>
+</div>
+
+</div>
+<!-- ============ END WORKBENCH TAB ============ -->
+
+<!-- ============ DTE SCALING TAB (live — offset c / exponent here drive the whole model) ============ -->
+<div class="tabpanel" id="tab-dte">
+<div class="panel">
+  <h2>DTE margin curve
+    <span class="info-icon" data-tip="c and exponent here are live — they're the actual curve used to turn every strategy's &quot;margin @0DTE&quot; into a full weekday margin, back on the Workbench tab. The two &quot;preview&quot; fields below are just for looking at the curve here; they don't feed the solver.">?</span>
+  </h2>
+  <div class="heur-grid">
+    <div>
+      <div class="field-row"><label>Preview: margin @0DTE ($/lot)</label><input type="number" id="m0dte" value="500" step="10"></div>
+      <div class="field-row"><label>Preview: target DTE (days)</label><input type="number" id="targetDte" value="5" step="1"></div>
+      <div class="field-row">
+        <label>Offset c (calibration)
+          <span class="info-icon" data-tip="A small buffer so the curve doesn't drop all the way to zero at 0 DTE, since a real position always carries some margin even on its expiry day.">?</span>
+        </label>
+        <input type="number" id="offsetC" value="1" step="0.1">
+      </div>
+      <div class="field-row">
+        <label>Exponent (0.5 = pure √T)
+          <span class="info-icon" data-tip="How fast margin grows as expiry gets further away. 0.5 matches how option prices typically scale with time — raise it if your real margin data grows faster than that.">?</span>
+        </label>
+        <input type="number" id="exponent" value="0.5" step="0.05">
+      </div>
+      <p class="heur-note">
+        margin(DTE) ≈ margin(0DTE) × ((DTE + c) / c)<sup>exponent</sup>
+      </p>
+    </div>
+    <div>
+      <div class="heur-result">
+        <div style="color:var(--text-dim);font-size:11px;margin-bottom:4px;">estimated margin at target DTE</div>
+        <div class="big" id="heurResult">$0</div>
+        <div class="ratio" id="heurRatio">ratio to 0DTE: —</div>
+      </div>
+      <div class="curve"><svg id="curveSvg" viewBox="0 0 300 100" preserveAspectRatio="none"></svg></div>
+      <div style="font-size:11px;color:var(--text-dim);text-align:center;">margin ratio vs 0DTE, 0→30 DTE</div>
+    </div>
+  </div>
+</div>
+</div>
+<!-- ============ END DTE TAB ============ -->
+
+<footer>Solved client-side with javascript-lp-solver (branch &amp; bound MILP). Nothing here calls a live margin API — planning surface only.</footer>
+
+</div>
+
+<script>
+const WEEKDAYS = ['mon','tue','wed','thu','fri'];
+
+const DEFAULTS = {
+  horizon: 'weekly',
+  marginInputMode: 'dte', // 'dte' | 'independent'
+  objective: 'total',
+  strategies: [],
+  totalCapital: 10000000,
+  nfExpiry: 'tue',
+  bnExpiry: 'tue',
+  snExpiry: 'thu',
+  monthlyExpiryWeek: 4,
+  riskLambda: 1,
+  capNF: 0, capBN: 0, capSN: 0,
+  minNF: 0, minBN: 0, minSN: 0,
+  minTotalMargin: 0,
+  offsetC: 1,
+  exponent: 0.5
+};
+let state = JSON.parse(JSON.stringify(DEFAULTS));
+let lastOptimalScales = null; // per-strategy scale factors from the last successful solve; invalidated on any edit
+let lastSolveMs = null, lastObjType = null, lastObjRaw = null; // raw last-solve numbers, kept so the display can be reformatted (e.g. unit toggle) without re-solving
+let displayUnit = 'raw'; // 'raw' | 'millions'
+
+// fields whose value lives in a plain DOM input/select but must be forced
+// from `state` on load, rather than left to the browser's own form-restore
+// memory (which otherwise silently overrides the intended defaults)
+const DOM_BACKED_FIELDS = ['totalCapital','nfExpiry','bnExpiry','snExpiry','monthlyExpiryWeek','riskLambda','capNF','capBN','capSN','minNF','minBN','minSN','minTotalMargin','offsetC','exponent'];
+
+function loadState(){
+  try{
+    const saved = localStorage.getItem('marginDeskStateV5');
+    if(saved){ const parsed = JSON.parse(saved); if(parsed && parsed.strategies) state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), parsed); }
+  }catch(e){ console.warn('no saved state', e); }
+}
+function saveState(){
+  DOM_BACKED_FIELDS.forEach(id=>{ state[id] = document.getElementById(id).value; });
+  lastOptimalScales = null; // any edit invalidates the last solve's numbers
+  try{ localStorage.setItem('marginDeskStateV5', JSON.stringify(state)); }
+  catch(e){ console.warn('could not save state', e); }
+}
+function applyDomBackedFields(){
+  DOM_BACKED_FIELDS.forEach(id=>{
+    const el = document.getElementById(id);
+    if(el && state[id] !== undefined) el.value = state[id];
+  });
+}
+function fmt(n){
+  n = n||0;
+  if(displayUnit === 'millions') return '$'+(n/1e6).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'M';
+  return '$'+Math.round(n).toLocaleString('en-US');
+}
+function fmtNum(n){
+  n = n||0;
+  if(displayUnit === 'millions') return (n/1e6).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'M';
+  return Math.round(n).toLocaleString('en-US');
+}
+function num(v){ return Number(v)||0; }
+
+function expiryDayFor(index){
+  if(index==='NF') return document.getElementById('nfExpiry').value;
+  if(index==='BN') return document.getElementById('bnExpiry').value;
+  if(index==='SN') return document.getElementById('snExpiry').value;
+  return null;
+}
+function monthlyExpiryWeek(){ return Number(document.getElementById('monthlyExpiryWeek').value)||4; }
+
+// ---- day-slot handling ----
+function getSlots(){
+  if(state.horizon === 'weekly') return WEEKDAYS.slice();
+  const slots = [];
+  for(let w=1; w<=4; w++){ WEEKDAYS.forEach(wd=> slots.push('w'+w+'_'+wd)); }
+  return slots;
+}
+function slotWeekday(slot){
+  return state.horizon === 'weekly' ? slot : slot.split('_')[1];
+}
+function slotWeekNum(slot){
+  if(state.horizon === 'weekly') return 1;
+  return Number(slot.split('_')[0].replace('w',''));
+}
+
+// DTE (in trading days) from a given weekday to this index's expiry weekday,
+// wrapping to the following week's expiry if the weekday is past this week's expiry
+function dteFor(weekday, expiryWeekday){
+  const wi = WEEKDAYS.indexOf(weekday);
+  const ei = WEEKDAYS.indexOf(expiryWeekday);
+  if(wi<0 || ei<0) return 0;
+  return (ei - wi + 5) % 5;
+}
+function globalCurve(){
+  return { c: num(document.getElementById('offsetC').value)||1, exp: num(document.getElementById('exponent').value)||0.5 };
+}
+// lots held on a given weekday, per unit of this strategy, from its lot-count string e.g. "12111"
+function lotsForWeekday(strat, wd){
+  const idx = WEEKDAYS.indexOf(wd);
+  const str = String(strat.lotString||'');
+  const ch = str[idx];
+  return ch ? (Number(ch)||0) : 0;
+}
+// margin for ONE unit of a strategy on a given slot: 0DTE margin/lot -> DTE curve -> x lots that day -> expiry-day multiplier
+function unitMargin(strat, slot){
+  const wd = slotWeekday(slot);
+  let raw;
+  if(state.marginInputMode === 'independent'){
+    raw = strat.indepMargins ? num(strat.indepMargins[wd]) : 0;
+    if(raw === 0) return 0;
+  }else{
+    const lots = lotsForWeekday(strat, wd);
+    if(lots === 0) return 0;
+    const { c, exp } = globalCurve();
+    const perLot = num(strat.margin0DTE) * Math.pow((dteFor(wd, expiryDayFor(strat.index)) + c)/c, exp);
+    raw = perLot * lots;
+  }
+  const expDay = expiryDayFor(strat.index);
+  if(wd !== expDay) return raw;
+  if(strat.type === 'monthly'){
+    return (slotWeekNum(slot) === monthlyExpiryWeek()) ? raw*2 : raw;
+  }
+  return raw*2; // daily/weekly: double every occurrence of the expiry weekday
+}
+// the dollar margin this strategy would need on its heaviest slot, at scale = 1
+// (used to translate a $-denominated "current margin" figure into an internal scale factor)
+function peakUnitMargin(strat){
+  const vals = getSlots().map(sl=>unitMargin(strat, sl));
+  return Math.max(...vals, 0.0001);
+}
+// how many "copies" of the lot-pattern the entered current $ margin corresponds to
+function currentScale(strat){
+  return num(strat.currentMargin) / peakUnitMargin(strat);
+}
+
+// ---------- TABS ----------
+document.querySelectorAll('.tabbtn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.tabbtn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+  });
+});
+
+// ---------- HORIZON / OBJECTIVE CONTROLS ----------
+function hasMonthlyStrategy(){ return state.strategies.some(s=>s.type==='monthly'); }
+
+function refreshHorizonLock(){
+  const weeklyBtn = document.getElementById('horizonWeeklyBtn');
+  const monthlyBtn = document.getElementById('horizonMonthlyBtn');
+  const notice = document.getElementById('horizonNotice');
+  const locked = hasMonthlyStrategy();
+  weeklyBtn.disabled = locked;
+  weeklyBtn.title = locked ? 'Disabled — monthly strategies are in the mix, weekly optimization is not valid' : '';
+  if(locked && state.horizon !== 'monthly'){
+    state.horizon = 'monthly';
+    saveState();
+  }
+  weeklyBtn.classList.toggle('active', state.horizon==='weekly');
+  monthlyBtn.classList.toggle('active', state.horizon==='monthly');
+  notice.style.display = locked ? 'block' : 'none';
+  notice.textContent = locked ? 'Switched to monthly — monthly strategies are present, weekly optimization is disallowed.' : '';
+  document.getElementById('monthlyExpiryWeekRow').style.display = state.horizon==='monthly' ? 'flex' : 'none';
+
+  const period = state.horizon==='monthly' ? 'month' : 'week';
+  document.getElementById('expReturnLabel').textContent = 'exp. return ($/'+period+')';
+  document.getElementById('riskLabel').textContent = 'risk ($/'+period+')';
+}
+
+document.getElementById('horizonWeeklyBtn').addEventListener('click', ()=>{
+  if(hasMonthlyStrategy()) return;
+  state.horizon = 'weekly'; saveState(); refreshHorizonLock(); renderTotals(); renderFormulation();
+});
+document.getElementById('horizonMonthlyBtn').addEventListener('click', ()=>{
+  state.horizon = 'monthly'; saveState(); refreshHorizonLock(); renderTotals(); renderFormulation();
+});
+
+function refreshObjectiveUI(){
+  document.getElementById('objTotalBtn').classList.toggle('active', state.objective==='total');
+  document.getElementById('objMaximinBtn').classList.toggle('active', state.objective==='maximin');
+  document.getElementById('objRiskBtn').classList.toggle('active', state.objective==='riskadj');
+  document.getElementById('lambdaRow').style.display = state.objective==='riskadj' ? 'flex' : 'none';
+  document.getElementById('riskNotice').style.display = state.objective==='riskadj' ? 'block' : 'none';
+  document.querySelectorAll('.riskcol').forEach(el=> el.classList.toggle('show', state.objective==='riskadj'));
+}
+document.getElementById('objTotalBtn').addEventListener('click', ()=>{ state.objective='total'; saveState(); refreshObjectiveUI(); renderFormulation(); });
+document.getElementById('objMaximinBtn').addEventListener('click', ()=>{ state.objective='maximin'; saveState(); refreshObjectiveUI(); renderFormulation(); });
+document.getElementById('objRiskBtn').addEventListener('click', ()=>{ state.objective='riskadj'; saveState(); refreshObjectiveUI(); render(); renderFormulation(); });
+
+document.getElementById('marginModeDteBtn').addEventListener('click', ()=>{
+  state.marginInputMode = 'dte'; saveState();
+  document.getElementById('marginModeDteBtn').classList.add('active');
+  document.getElementById('marginModeIndepBtn').classList.remove('active');
+  render(); renderFormulation();
+});
+document.getElementById('marginModeIndepBtn').addEventListener('click', ()=>{
+  state.marginInputMode = 'independent'; saveState();
+  document.getElementById('marginModeIndepBtn').classList.add('active');
+  document.getElementById('marginModeDteBtn').classList.remove('active');
+  render(); renderFormulation();
+});
+
+['totalCapital','nfExpiry','bnExpiry','snExpiry','monthlyExpiryWeek','riskLambda','capNF','capBN','capSN','minNF','minBN','minSN','minTotalMargin','offsetC','exponent'].forEach(id=>{
+  document.getElementById(id).addEventListener('input', ()=>{ saveState(); renderTotals(); renderFormulation(); });
+});
+
+// ---------- STRATEGY TABLE ----------
+function render(){
+  const tbody = document.getElementById('stratBody');
+  tbody.innerHTML = '';
+  document.getElementById('emptyTableMsg').style.display = state.strategies.length===0 ? 'block' : 'none';
+  const fragment = document.createDocumentFragment();
+
+  state.strategies.forEach((strat, idx) => {
+    const tr = document.createElement('tr');
+
+    const tdName = document.createElement('td');
+    const nameInput = document.createElement('input');
+    nameInput.className = 'name-input'; nameInput.value = strat.name;
+    nameInput.addEventListener('input', e => { strat.name = e.target.value; saveState(); });
+    tdName.appendChild(nameInput); tr.appendChild(tdName);
+
+    const tdIdx = document.createElement('td');
+    const idxSel = document.createElement('select'); idxSel.className = 'idx-select';
+    ['NF','BN','SN'].forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; if(strat.index===v)o.selected=true; idxSel.appendChild(o); });
+    idxSel.addEventListener('change', e=>{ strat.index = e.target.value; saveState(); renderTotals(); renderFormulation(); });
+    tdIdx.appendChild(idxSel); tr.appendChild(tdIdx);
+
+    const tdOv = document.createElement('td');
+    const ovSel = document.createElement('select'); ovSel.className = 'bool-select';
+    [['no','No'],['yes','Yes']].forEach(([v,label])=>{ const o=document.createElement('option'); o.value=v; o.textContent=label; if((strat.overnight?'yes':'no')===v)o.selected=true; ovSel.appendChild(o); });
+    ovSel.addEventListener('change', e=>{
+      strat.overnight = (e.target.value === 'yes');
+      if(!strat.overnight){ strat.type = 'daily'; }
+      else if(strat.type === 'daily'){ strat.type = 'weekly'; }
+      saveState(); render(); refreshHorizonLock(); renderFormulation();
+    });
+    tdOv.appendChild(ovSel); tr.appendChild(tdOv);
+
+    const tdType = document.createElement('td');
+    const typeSel = document.createElement('select'); typeSel.className = 'type-select';
+    const typeOptions = strat.overnight ? ['weekly','monthly'] : ['daily'];
+    typeOptions.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; if(strat.type===v)o.selected=true; typeSel.appendChild(o); });
+    if(!strat.overnight) typeSel.disabled = true;
+    typeSel.addEventListener('change', e=>{ strat.type = e.target.value; saveState(); refreshHorizonLock(); renderFormulation(); });
+    tdType.appendChild(typeSel); tr.appendChild(tdType);
+
+    const tdCur = document.createElement('td');
+    const curInput = document.createElement('input'); curInput.className='units-cell'; curInput.style.width='90px'; curInput.type='number'; curInput.min='0'; curInput.step='1000'; curInput.placeholder='0';
+    curInput.value = strat.currentMargin || 0;
+    curInput.addEventListener('input', e=>{ strat.currentMargin = num(e.target.value); saveState(); renderTotals(); });
+    tdCur.appendChild(curInput); tr.appendChild(tdCur);
+
+    const tdMinM = document.createElement('td');
+    const minMInput = document.createElement('input'); minMInput.className='units-cell'; minMInput.style.width='76px'; minMInput.type='number'; minMInput.min='0'; minMInput.step='1000'; minMInput.placeholder='none';
+    minMInput.value = strat.minMarginPerStrategy || '';
+    minMInput.addEventListener('input', e=>{ strat.minMarginPerStrategy = num(e.target.value); saveState(); renderFormulation(); });
+    tdMinM.appendChild(minMInput); tr.appendChild(tdMinM);
+
+    const tdMaxM = document.createElement('td');
+    const maxMInput = document.createElement('input'); maxMInput.className='units-cell'; maxMInput.style.width='76px'; maxMInput.type='number'; maxMInput.min='0'; maxMInput.step='1000'; maxMInput.placeholder='none';
+    maxMInput.value = strat.maxMarginPerStrategy || '';
+    maxMInput.addEventListener('input', e=>{ strat.maxMarginPerStrategy = num(e.target.value); saveState(); renderFormulation(); });
+    tdMaxM.appendChild(maxMInput); tr.appendChild(tdMaxM);
+
+    const tdLots = document.createElement('td'); tdLots.className='dtecol'; if(state.marginInputMode==='dte') tdLots.classList.add('show'); tdLots.style.textAlign='left';
+    const lotsInput = document.createElement('input'); lotsInput.className='cell'; lotsInput.style.width='90px'; lotsInput.type='text'; lotsInput.maxLength=5; lotsInput.placeholder='12111';
+    lotsInput.value = strat.lotString || '';
+    lotsInput.addEventListener('input', e=>{ strat.lotString = e.target.value.replace(/[^0-9]/g,'').slice(0,5); e.target.value = strat.lotString; saveState(); renderTotals(); renderFormulation(); });
+    tdLots.appendChild(lotsInput); tr.appendChild(tdLots);
+
+    const tdM0 = document.createElement('td'); tdM0.className='dtecol'; if(state.marginInputMode==='dte') tdM0.classList.add('show');
+    const m0Input = document.createElement('input'); m0Input.className='units-cell'; m0Input.style.width='76px'; m0Input.type='number'; m0Input.min='0'; m0Input.step='100';
+    m0Input.value = strat.margin0DTE || 0;
+    m0Input.addEventListener('input', e=>{ strat.margin0DTE = num(e.target.value); saveState(); renderTotals(); renderFormulation(); });
+    tdM0.appendChild(m0Input); tr.appendChild(tdM0);
+
+    const tdIndep = document.createElement('td'); tdIndep.className='indepcol'; if(state.marginInputMode==='independent') tdIndep.classList.add('show'); tdIndep.style.textAlign='left';
+    const indepInput = document.createElement('input'); indepInput.className='cell margin-string'; indepInput.style.width='190px'; indepInput.type='text'; indepInput.placeholder='150000,300000,150000,150000,150000';
+    indepInput.value = strat.indepMargins ? WEEKDAYS.map(d=>strat.indepMargins[d]).join(',') : '0,0,0,0,0';
+    indepInput.addEventListener('input', e=>{
+      const parts = e.target.value.split(',').map(s=>Number(String(s).trim())||0);
+      const obj = {}; WEEKDAYS.forEach((d,i)=>{ obj[d] = parts[i]||0; });
+      strat.indepMargins = obj;
+      saveState(); renderTotals(); renderFormulation();
+    });
+    tdIndep.appendChild(indepInput); tr.appendChild(tdIndep);
+
+    const tdRet = document.createElement('td'); tdRet.className='riskcol'; if(state.objective==='riskadj') tdRet.classList.add('show');
+    const retInput = document.createElement('input'); retInput.className='units-cell'; retInput.style.width='72px'; retInput.type='number'; retInput.step='100';
+    retInput.value = strat.expectedReturn||0;
+    retInput.addEventListener('input', e=>{ strat.expectedReturn = num(e.target.value); saveState(); renderFormulation(); });
+    tdRet.appendChild(retInput); tr.appendChild(tdRet);
+
+    const tdRisk = document.createElement('td'); tdRisk.className='riskcol'; if(state.objective==='riskadj') tdRisk.classList.add('show');
+    const riskInput = document.createElement('input'); riskInput.className='units-cell'; riskInput.style.width='72px'; riskInput.type='number'; riskInput.step='100';
+    riskInput.value = strat.risk||0;
+    riskInput.addEventListener('input', e=>{ strat.risk = num(e.target.value); saveState(); renderFormulation(); });
+    tdRisk.appendChild(riskInput); tr.appendChild(tdRisk);
+
+    const tdRemove = document.createElement('td');
+    const rm = document.createElement('button'); rm.className='remove-btn'; rm.textContent='✕';
+    rm.addEventListener('click', ()=>{ state.strategies.splice(idx,1); saveState(); render(); refreshHorizonLock(); renderFormulation(); });
+    tdRemove.appendChild(rm); tr.appendChild(tdRemove);
+
+    fragment.appendChild(tr);
+  });
+  tbody.appendChild(fragment);
+
+  renderTotals();
+  refreshHorizonLock();
+}
+
+function renderTotals(){
+  const cap = num(document.getElementById('totalCapital').value) || 1;
+  renderWeekTypeReport(cap);
+}
+
+// scale factor to use for a strategy at row-index i, under the current report mode
+function scaleForReport(strat, i){
+  const mode = document.getElementById('reportMode').value;
+  if(mode === 'current') return currentScale(strat);
+  if(!lastOptimalScales || lastOptimalScales[i] === undefined) return null;
+  return lastOptimalScales[i];
+}
+
+// Shows margin broken out per strategy (plus a TOTAL and UTILIZATION row), by weekday.
+// Under monthly horizon this collapses each strategy to two rows — the designated
+// expiry week and every other week (identical to each other) — instead of 20 slots.
+let weekTypeView = 'nonexp'; // 'nonexp' | 'exp' — which week the monthly-horizon report shows
+
+function renderWeekTypeReport(cap){
+  const tbody = document.getElementById('weekTypeReportBody');
+  const emptyMsg = document.getElementById('reportEmptyMsg');
+  const tableWrap = document.getElementById('reportTableWrap');
+  const toggleWrap = document.getElementById('weekTypeToggle');
+  const mode = document.getElementById('reportMode').value;
+  const expWeek = monthlyExpiryWeek();
+
+  toggleWrap.style.display = (state.horizon === 'monthly') ? 'flex' : 'none';
+  document.getElementById('weekTypeExpBtn').textContent = 'Expiry week (wk '+expWeek+')';
+
+  if(state.strategies.length === 0){
+    tbody.innerHTML = '';
+    emptyMsg.style.display = 'block';
+    emptyMsg.textContent = 'No strategies yet — add some on the table above.';
+    tableWrap.style.display = 'none';
+    return;
+  }
+  if(mode === 'optimal' && !lastOptimalScales){
+    tbody.innerHTML = '';
+    emptyMsg.style.display = 'block';
+    emptyMsg.textContent = 'Run "Solve MILP" above first — there\'s no optimal allocation to show yet.';
+    tableWrap.style.display = 'none';
+    return;
+  }
+  emptyMsg.style.display = 'none';
+  tableWrap.style.display = 'block';
+
+  function marginRow(label, values, bold){
+    return `<tr${bold?' class="total-row"':''}><td style="text-align:left;">${label}</td>`+
+      values.map(v=>`<td>${fmtNum(v)}</td>`).join('')+`</tr>`;
+  }
+  function utilRowHtml(label, values){
+    return `<tr class="util-row"><td style="text-align:left;">${label}</td>`+
+      values.map(v=>{
+        const util = v/cap;
+        return `<td><div class="util-cell"><div class="util-num">${(util*100).toFixed(1)}%</div><div class="util-bar-track"><div class="util-bar-fill" style="width:${Math.min(util*100,100)}%;background:var(--accent-2)"></div></div></div></td>`;
+      }).join('')+`</tr>`;
+  }
+
+  let html = '';
+
+  if(state.horizon === 'weekly'){
+    const totals = [0,0,0,0,0];
+    state.strategies.forEach((strat,i)=>{
+      const scale = scaleForReport(strat, i);
+      const values = WEEKDAYS.map((wd,di)=>{
+        const v = scale===null ? 0 : unitMargin(strat, wd)*scale;
+        totals[di]+=v;
+        return v;
+      });
+      html += marginRow(strat.name, values);
+    });
+    html += marginRow('TOTAL', totals, true);
+    html += utilRowHtml('UTILIZATION', totals);
+  }else{
+    const nonExpWeek = expWeek === 1 ? 2 : 1;
+    const weekNum = weekTypeView === 'exp' ? expWeek : nonExpWeek;
+    const totals = [0,0,0,0,0];
+
+    state.strategies.forEach((strat,i)=>{
+      const scale = scaleForReport(strat, i);
+      const values = WEEKDAYS.map((wd,di)=>{
+        const v = scale===null ? 0 : unitMargin(strat, 'w'+weekNum+'_'+wd)*scale;
+        totals[di]+=v;
+        return v;
+      });
+      html += marginRow(strat.name, values);
+    });
+    html += marginRow('TOTAL', totals, true);
+    html += utilRowHtml('UTILIZATION', totals);
+  }
+
+  tbody.innerHTML = html;
+}
+
+document.getElementById('weekTypeNonExpBtn').addEventListener('click', ()=>{
+  weekTypeView = 'nonexp';
+  document.getElementById('weekTypeNonExpBtn').classList.add('active');
+  document.getElementById('weekTypeExpBtn').classList.remove('active');
+  renderTotals();
+});
+document.getElementById('weekTypeExpBtn').addEventListener('click', ()=>{
+  weekTypeView = 'exp';
+  document.getElementById('weekTypeExpBtn').classList.add('active');
+  document.getElementById('weekTypeNonExpBtn').classList.remove('active');
+  renderTotals();
+});
+
+document.getElementById('reportMode').addEventListener('change', ()=>{
+  renderTotals();
+});
+
+document.getElementById('addRow').addEventListener('click', ()=>{
+  state.strategies.push({name:'NEW_STRAT', index:'NF', overnight:true, type:'weekly', currentMargin:0, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:0, indepMargins:{mon:0,tue:0,wed:0,thu:0,fri:0}, expectedReturn:0, risk:0});
+  saveState(); render(); renderFormulation();
+});
+
+document.getElementById('loadSample').addEventListener('click', ()=>{
+  const sample = [
+    {name:'NF_DAILY',    index:'NF', overnight:false, type:'daily',   currentMargin:1200000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:600000, indepMargins:{mon:850000,tue:1200000,wed:1340000,thu:1200000,fri:1040000}, expectedReturn:40000, risk:20000},
+    {name:'NF_MONTHLY',  index:'NF', overnight:true,  type:'monthly', currentMargin:800000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:400000, indepMargins:{mon:566000,tue:400000,wed:894000,thu:800000,fri:693000}, expectedReturn:70000, risk:45000},
+    {name:'BN_DAILY',    index:'BN', overnight:false, type:'daily',   currentMargin:1000000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'12111', margin0DTE:500000, indepMargins:{mon:707000,tue:1000000,wed:1118000,thu:1000000,fri:866000}, expectedReturn:30000, risk:15000},
+    {name:'BN_MONTHLY',  index:'BN', overnight:true,  type:'monthly', currentMargin:700000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:350000, indepMargins:{mon:495000,tue:350000,wed:783000,thu:700000,fri:606000}, expectedReturn:55000, risk:35000},
+    {name:'SN_DAILY',    index:'SN', overnight:false, type:'daily',   currentMargin:1050000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'10203', margin0DTE:550000, indepMargins:{mon:1100000,tue:0,wed:1556000,thu:0,fri:3690000}, expectedReturn:35000, risk:18000},
+    {name:'SN_MONTHLY',  index:'SN', overnight:true,  type:'monthly', currentMargin:750000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:380000, indepMargins:{mon:760000,tue:658000,wed:537000,thu:380000,fri:850000}, expectedReturn:60000, risk:38000}
+  ];
+  state.strategies = state.strategies.concat(sample);
+  saveState();
+  render();
+  refreshHorizonLock();
+  renderFormulation();
+});
+
+document.getElementById('downloadSample').addEventListener('click', ()=>{
+  try{
+    const rows = [
+      {strategy:'NF_DAILY',   index:'NF', overnight:'no',  type:'daily',   current_margin:1200000, min_margin:0, max_margin:0, lots:'11111', margin_0dte:600000, expected_return:40000, risk:20000},
+      {strategy:'NF_MONTHLY', index:'NF', overnight:'yes', type:'monthly', current_margin:800000, min_margin:0, max_margin:0, lots:'11111', margin_0dte:400000, expected_return:70000, risk:45000},
+      {strategy:'BN_DAILY',   index:'BN', overnight:'no',  type:'daily',   current_margin:1000000, min_margin:0, max_margin:0, lots:'12111', margin_0dte:500000, expected_return:30000, risk:15000},
+      {strategy:'BN_MONTHLY', index:'BN', overnight:'yes', type:'monthly', current_margin:700000, min_margin:0, max_margin:0, lots:'11111', margin_0dte:350000, expected_return:55000, risk:35000},
+      {strategy:'SN_DAILY',   index:'SN', overnight:'no',  type:'daily',   current_margin:1050000, min_margin:0, max_margin:0, lots:'10203', margin_0dte:550000, expected_return:35000, risk:18000},
+      {strategy:'SN_MONTHLY', index:'SN', overnight:'yes', type:'monthly', current_margin:750000, min_margin:0, max_margin:0, lots:'11111', margin_0dte:380000, expected_return:60000, risk:38000}
+    ];
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'strategies');
+    XLSX.writeFile(wb, 'margin_allocation_sample.xlsx');
+    showToast('Sample template downloaded.');
+  }catch(err){
+    console.error(err);
+    showToast('Could not generate the sample file: '+err.message, true);
+  }
+});
+
+let resetArmed = false, resetArmTimer = null;
+document.getElementById('resetStrats').addEventListener('click', function(){
+  const btn = this;
+  if(state.strategies.length === 0) return;
+
+  if(!resetArmed){
+    resetArmed = true;
+    btn.dataset.originalLabel = btn.textContent;
+    btn.textContent = 'click again to confirm';
+    clearTimeout(resetArmTimer);
+    resetArmTimer = setTimeout(()=>{
+      resetArmed = false;
+      btn.textContent = btn.dataset.originalLabel;
+    }, 4000);
+    return;
+  }
+
+  resetArmed = false;
+  clearTimeout(resetArmTimer);
+  btn.textContent = btn.dataset.originalLabel || 'reset strategies';
+
+  state.strategies = [];
+  saveState();
+  render();
+  refreshHorizonLock();
+  renderFormulation();
+  document.getElementById('solverOutput').style.display = 'none';
+  document.getElementById('solverEmpty').style.display = 'block';
+  document.getElementById('solverEmpty').textContent = 'Add strategies above, then hit "Solve MILP" to see the optimal dollar allocation here.';
+  const badge = document.getElementById('statusBadge');
+  badge.textContent = 'not solved yet';
+  badge.className = 'status-badge';
+  showToast('All strategies cleared.');
+});
+
+// ---------- FILE UPLOAD (xlsx / csv) ----------
+function normalizeHeader(h){ return String(h||'').trim().toLowerCase().replace(/[\s_]+/g,''); }
+document.getElementById('fileUpload').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt)=>{
+    try{
+      const data = new Uint8Array(evt.target.result);
+      const wb = XLSX.read(data, {type:'array'});
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, {defval:''});
+      if(!rows.length){ showToast('No rows found in file.', true); return; }
+
+      const colMap = {};
+      Object.keys(rows[0]).forEach(k=>{ colMap[normalizeHeader(k)] = k; });
+      const findCol = (...cands) => { for(const c of cands){ if(colMap[c]!==undefined) return colMap[c]; } return null; };
+
+      const nameCol = findCol('strategy','name');
+      const idxCol = findCol('index');
+      const ovCol = findCol('overnight');
+      const typeCol = findCol('type');
+      const curCol = findCol('currentmargin','currentunits','curmargin');
+      const maxMCol = findCol('maxmargin','maxmarginperstrategy');
+      const minMCol = findCol('minmargin','minmarginperstrategy');
+      const retCol = findCol('expectedreturn','return');
+      const riskCol = findCol('risk');
+      const lotsCol = findCol('lots','lotstring','lotpattern');
+      const m0Col = findCol('margin0dte','0dtemargin','margin0');
+      const indepCols = {mon:findCol('marginmon','mon'), tue:findCol('margintue','tue'), wed:findCol('marginwed','wed'), thu:findCol('marginthu','thu'), fri:findCol('marginfri','fri')};
+
+      const parsed = rows.map(r=>{
+        const overnight = ovCol ? /^(y|yes|true|1)$/i.test(String(r[ovCol]).trim()) : true;
+        let type = typeCol ? String(r[typeCol]).toLowerCase() : 'weekly';
+        if(!overnight) type = 'daily';
+        else if(type==='daily') type = 'weekly';
+        const hasIndep = Object.values(indepCols).some(c=>c!==null);
+        return {
+          name: nameCol ? String(r[nameCol]) : 'STRAT',
+          index: idxCol ? String(r[idxCol]).toUpperCase() : 'NF',
+          overnight, type,
+          currentMargin: curCol ? num(r[curCol]) : 0,
+          maxMarginPerStrategy: maxMCol ? num(r[maxMCol]) : 0,
+          minMarginPerStrategy: minMCol ? num(r[minMCol]) : 0,
+          expectedReturn: retCol ? num(r[retCol]) : 0,
+          risk: riskCol ? num(r[riskCol]) : 0,
+          lotString: lotsCol ? String(r[lotsCol]).replace(/[^0-9]/g,'').slice(0,5) : '00000',
+          margin0DTE: m0Col ? num(r[m0Col]) : 0,
+          indepMargins: hasIndep ? {
+            mon: indepCols.mon ? num(r[indepCols.mon]) : 0,
+            tue: indepCols.tue ? num(r[indepCols.tue]) : 0,
+            wed: indepCols.wed ? num(r[indepCols.wed]) : 0,
+            thu: indepCols.thu ? num(r[indepCols.thu]) : 0,
+            fri: indepCols.fri ? num(r[indepCols.fri]) : 0
+          } : {mon:0,tue:0,wed:0,thu:0,fri:0}
+        };
+      }).filter(s => ['NF','BN','SN'].includes(s.index));
+
+      if(!parsed.length){ showToast('Could not find valid rows — check the index column has NF/BN/SN.', true); return; }
+      state.strategies = state.strategies.concat(parsed);
+      saveState(); render(); refreshHorizonLock(); renderFormulation();
+    }catch(err){ console.error(err); showToast('Could not parse file: '+err.message, true); }
+    e.target.value = '';
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+// ---------- INFO ICONS (global fixed-position tooltip, immune to ancestor scroll clipping) ----------
+let openTipIcon = null;
+
+function positionTooltip(icon){
+  const tip = document.getElementById('globalTooltip');
+  tip.textContent = icon.dataset.tip || '';
+  tip.classList.add('show');
+  tip.style.left = '0px'; tip.style.top = '0px';
+  const rect = icon.getBoundingClientRect();
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  let left = rect.left + rect.width/2 - tw/2;
+  let top = rect.top - th - 8;
+  if(top < 8) top = rect.bottom + 8; // flip below if not enough room above
+  left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+}
+function hideTooltip(){
+  document.getElementById('globalTooltip').classList.remove('show');
+  openTipIcon = null;
+}
+
+document.addEventListener('mouseover', (e)=>{
+  const icon = e.target.closest('.info-icon');
+  if(icon) positionTooltip(icon);
+});
+document.addEventListener('mouseout', (e)=>{
+  const icon = e.target.closest('.info-icon');
+  if(icon && !openTipIcon) hideTooltip();
+});
+document.addEventListener('click', (e)=>{
+  const icon = e.target.closest('.info-icon');
+  if(icon){
+    e.stopPropagation();
+    e.preventDefault();
+    if(openTipIcon === icon){ hideTooltip(); }
+    else{ openTipIcon = icon; positionTooltip(icon); }
+  }else{
+    hideTooltip();
+  }
+}, true);
+window.addEventListener('resize', ()=>{ if(openTipIcon) positionTooltip(openTipIcon); });
+window.addEventListener('scroll', ()=>{ if(openTipIcon) positionTooltip(openTipIcon); }, true);
+
+// ---------- TOAST (non-blocking notifications — native alert/confirm can be silently blocked in a sandboxed preview) ----------
+let toastTimer = null;
+function showToast(msg, isError){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>{ t.classList.remove('show'); }, 4000);
+}
+
+// ---------- UNITS ($ vs $M) ----------
+document.getElementById('unitToggle').addEventListener('click', ()=>{
+  displayUnit = displayUnit === 'raw' ? 'millions' : 'raw';
+  document.getElementById('unitToggle').textContent = displayUnit === 'millions' ? 'units: $M' : 'units: $';
+  try{ localStorage.setItem('marginDeskUnit', displayUnit); }catch(e){}
+  renderTotals();
+  renderFormulation();
+  renderSolverOutputTables();
+  renderHeuristic();
+});
+try{
+  const u = localStorage.getItem('marginDeskUnit');
+  if(u === 'millions'){ displayUnit = 'millions'; document.getElementById('unitToggle').textContent = 'units: $M'; }
+}catch(e){}
+
+// ---------- THEME ----------
+document.getElementById('themeToggle').addEventListener('click', ()=>{
+  const root = document.documentElement;
+  const current = root.getAttribute('data-theme');
+  if(current === 'dark'){ root.setAttribute('data-theme','light'); }
+  else if(current === 'light'){ root.setAttribute('data-theme','dark'); }
+  else { root.setAttribute('data-theme','light'); }
+  try{ localStorage.setItem('marginDeskTheme', root.getAttribute('data-theme')); }catch(e){}
+  renderHeuristic();
+});
+try{ const t = localStorage.getItem('marginDeskTheme'); if(t) document.documentElement.setAttribute('data-theme', t); }catch(e){}
+
+// ---------- FORMULATION ----------
+function renderFormulation(){
+  const cap = num(document.getElementById('totalCapital').value);
+  const minTotal = num(document.getElementById('minTotalMargin').value);
+  const block = document.getElementById('formulationBlock');
+  if(state.strategies.length===0){ block.textContent = 'Add at least one strategy to see the instantiated model.'; return; }
+
+  const slots = getSlots();
+  const capByIndex = {NF:num(document.getElementById('capNF').value), BN:num(document.getElementById('capBN').value), SN:num(document.getElementById('capSN').value)};
+  const minByIndex = {NF:num(document.getElementById('minNF').value), BN:num(document.getElementById('minBN').value), SN:num(document.getElementById('minSN').value)};
+  const lambda = num(document.getElementById('riskLambda').value);
+
+  let s = '';
+  s += 'DECISION VARIABLES\n';
+  state.strategies.forEach((strat,i)=>{
+    s += `  x_${i+1}  in R>=0    dollar-scale factor for "${strat.name}"'s lot pattern (x_${i+1} = 1 means run it exactly as entered)\n`;
+  });
+  if(state.objective==='maximin') s += `  z    in R         worst-slot utilization fraction, maximized\n`;
+
+  s += '\nOBJECTIVE\n';
+  if(state.objective==='total'){
+    const terms = state.strategies.map((strat,i)=>`${fmtNum(slots.reduce((a,sl)=>a+unitMargin(strat,sl),0))}*x_${i+1}`).join(' + ');
+    s += `  maximize   ${terms}\n            (sum of margin used across all ${slots.length} day-slot(s), in $)\n`;
+  }else if(state.objective==='maximin'){
+    s += `  maximize   z\n`;
+  }else{
+    const terms = state.strategies.map((strat,i)=>{
+      const coeff = num(strat.expectedReturn) - lambda*num(strat.risk);
+      return `${coeff.toFixed(1)}*x_${i+1}`;
+    }).join(' + ');
+    s += `  maximize   ${terms}\n            (expected return - lambda*risk at scale 1, lambda = ${lambda})\n`;
+  }
+
+  s += '\nCONSTRAINTS\n';
+  s += `  for each day-slot d in {${slots.slice(0,5).join(', ')}${slots.length>5?', ... ('+slots.length+' total)':''}}:\n`;
+  if(minTotal > 0){
+    s += `    ${fmtNum(minTotal)} <= sum_i c_i,d * x_i <= ${fmtNum(cap)}      (daily margin floor & capital ceiling)\n`;
+  }else{
+    s += `    sum_i c_i,d * x_i <= ${fmtNum(cap)}      (daily margin <= capital)\n`;
+  }
+  const ex = slots[0];
+  const exTerms = state.strategies.map((strat,i)=>`${fmtNum(unitMargin(strat,ex))}*x_${i+1}`).join(' + ');
+  s += `    e.g. ${ex}:  ${exTerms} <= ${fmtNum(cap)}\n`;
+
+  if(state.objective==='maximin'){
+    s += `  for each day-slot d:  sum_i c_i,d * x_i - ${fmtNum(cap)}*z >= 0   (z <= that slot's utilization)\n`;
+  }
+
+  const withMax = state.strategies.map((s2,i)=>({s2,i})).filter(o=>o.s2.maxMarginPerStrategy>0);
+  const withMin = state.strategies.map((s2,i)=>({s2,i})).filter(o=>o.s2.minMarginPerStrategy>0);
+  if(withMax.length){
+    s += `  for each day-slot d, for strategies with a $ ceiling set:\n`;
+    withMax.forEach(({s2,i})=>{ s += `    c_${i+1},d * x_${i+1} <= ${fmtNum(s2.maxMarginPerStrategy)}   ("${s2.name}" per-strategy ceiling)\n`; });
+  }
+  if(withMin.length){
+    s += `  for each day-slot d where the strategy actually has margin (c_i,d > 0), for strategies with a $ floor set:\n`;
+    withMin.forEach(({s2,i})=>{ s += `    c_${i+1},d * x_${i+1} >= ${fmtNum(s2.minMarginPerStrategy)}   ("${s2.name}" per-strategy floor)\n`; });
+  }
+  if(!withMax.length && !withMin.length){
+    s += `  (no per-strategy $ floors or ceilings set — strategies are bounded only by the shared daily constraints above)\n`;
+  }
+
+  ['NF','BN','SN'].forEach(I=>{
+    if(capByIndex[I]>0 || minByIndex[I]>0){
+      const members = state.strategies.map((s2,i)=>({s2,i})).filter(o=>o.s2.index===I);
+      if(members.length){
+        const terms = members.map(({s2,i})=>`c_${i+1},d*x_${i+1}`).join(' + ');
+        if(minByIndex[I]>0 && capByIndex[I]>0){
+          s += `  for each day-slot d:  ${fmtNum(minByIndex[I])} <= ${terms} <= ${fmtNum(capByIndex[I])}   (${I} index floor & ceiling)\n`;
+        }else if(capByIndex[I]>0){
+          s += `  for each day-slot d:  ${terms} <= ${fmtNum(capByIndex[I])}   (${I} index ceiling)\n`;
+        }else{
+          s += `  for each day-slot d:  ${terms} >= ${fmtNum(minByIndex[I])}   (${I} index floor)\n`;
+        }
+      }
+    }
+  });
+
+  state.strategies.forEach((strat,i)=>{ s += `  x_${i+1} >= 0`+(i<state.strategies.length-1?'\n':''); });
+
+  block.textContent = s;
+}
+
+// ---------- SOLVE ----------
+function buildAndSolve(){
+  const cap = num(document.getElementById('totalCapital').value) || 1;
+  const minTotal = num(document.getElementById('minTotalMargin').value);
+  const slots = getSlots();
+  const capByIndex = {NF:num(document.getElementById('capNF').value), BN:num(document.getElementById('capBN').value), SN:num(document.getElementById('capSN').value)};
+  const minByIndex = {NF:num(document.getElementById('minNF').value), BN:num(document.getElementById('minBN').value), SN:num(document.getElementById('minSN').value)};
+  const lambda = num(document.getElementById('riskLambda').value);
+
+  const variables = {};
+  const constraints = {};
+
+  slots.forEach(slot => {
+    const bound = {max: cap};
+    if(minTotal > 0) bound.min = minTotal;
+    constraints['slot_'+slot] = bound;
+  });
+
+  state.strategies.forEach((s, i) => {
+    const varName = 'x'+i;
+    const coeffs = {};
+    let totalUtilCoeff = 0;
+    slots.forEach(slot=>{
+      const m = unitMargin(s, slot);
+      coeffs['slot_'+slot] = m;
+      totalUtilCoeff += m;
+      if(state.objective === 'maximin') coeffs['z_'+slot] = m;
+
+      // per-strategy floor/ceiling — the floor only applies on days the strategy
+      // actually has margin (m > 0), so it doesn't force a position on days its
+      // own lot pattern has zero lots
+      if(s.maxMarginPerStrategy>0 || (s.minMarginPerStrategy>0 && m>0)){
+        const cname = 'stratcap_'+i+'_'+slot;
+        coeffs[cname] = m;
+        const bound = {};
+        if(s.maxMarginPerStrategy>0) bound.max = s.maxMarginPerStrategy;
+        if(s.minMarginPerStrategy>0 && m>0) bound.min = s.minMarginPerStrategy;
+        constraints[cname] = bound;
+      }
+
+      if(capByIndex[s.index] > 0 || minByIndex[s.index] > 0){
+        const cname = 'idxcap_'+s.index+'_'+slot;
+        coeffs[cname] = m;
+        if(!constraints[cname]){
+          const bound = {};
+          if(capByIndex[s.index] > 0) bound.max = capByIndex[s.index];
+          if(minByIndex[s.index] > 0) bound.min = minByIndex[s.index];
+          constraints[cname] = bound;
+        }
+      }
+    });
+    if(state.objective === 'total') coeffs['totalUtil'] = totalUtilCoeff;
+    if(state.objective === 'riskadj') coeffs['riskObj'] = num(s.expectedReturn) - lambda*num(s.risk);
+    variables[varName] = coeffs;
+  });
+
+  let optimizeName = state.objective==='total' ? 'totalUtil' : (state.objective==='maximin' ? 'z' : 'riskObj');
+  if(state.objective === 'maximin'){
+    const zCoeffs = {z:1};
+    slots.forEach(slot=>{ zCoeffs['z_'+slot] = -cap; constraints['z_'+slot] = {min:0}; });
+    variables['z'] = zCoeffs;
+  }
+
+  const model = { optimize: optimizeName, opType:'max', constraints, variables };
+  const t0 = performance.now();
+  const result = window.solver.Solve(model);
+  const t1 = performance.now();
+  return { result, solveMs:(t1-t0), cap, slots };
+}
+
+document.getElementById('solveBtn').addEventListener('click', ()=>{
+  const badge = document.getElementById('statusBadge');
+  if(state.strategies.length === 0){ badge.textContent='no strategies'; badge.className='status-badge bad'; return; }
+  let solved;
+  try{ solved = buildAndSolve(); }
+  catch(e){ badge.textContent='solver error'; badge.className='status-badge bad'; console.error(e); return; }
+  const { result, solveMs, cap, slots } = solved;
+
+  if(!result.feasible){
+    badge.textContent = 'infeasible'; badge.className = 'status-badge bad';
+    document.getElementById('solverEmpty').style.display = 'block';
+    document.getElementById('solverEmpty').textContent = 'No feasible allocation found — a floor (min $/strategy, min per-index, or min total) is probably clashing with a ceiling (capital, max per-index, or max per-strategy). Loosen one and try again.';
+    document.getElementById('solverOutput').style.display = 'none';
+    return;
+  }
+  if(result.bounded === false){
+    badge.textContent = 'unbounded'; badge.className = 'status-badge bad';
+    document.getElementById('solverEmpty').style.display = 'block';
+    document.getElementById('solverEmpty').textContent = 'Unbounded — a strategy likely has a lot pattern of all zeros (or margin @0DTE = 0) but a positive risk-adjusted coefficient, so nothing constrains how large it can scale. Give it a max $/strategy cap or fix its lots/margin @0DTE.';
+    document.getElementById('solverOutput').style.display = 'none';
+    return;
+  }
+
+  badge.textContent = 'optimal'; badge.className = 'status-badge ok';
+  document.getElementById('solverEmpty').style.display = 'none';
+  document.getElementById('solverOutput').style.display = 'block';
+
+  lastOptimalScales = state.strategies.map((s,i)=> result['x'+i] || 0);
+  lastSolveMs = solveMs;
+  lastObjType = state.objective === 'maximin' ? 'percent' : 'dollar';
+  lastObjRaw = state.objective === 'maximin' ? (result.z!==undefined ? result.z : null) : result.result;
+
+  renderTotals();
+  renderSolverOutputTables();
+});
+
+// Rebuilds everything in the solver-output panels purely from state + lastOptimalScales,
+// so it can be called again (e.g. after a unit toggle) without needing to re-solve.
+function renderSolverOutputTables(){
+  if(!lastOptimalScales) return;
+  const cap = num(document.getElementById('totalCapital').value) || 1;
+  const slots = getSlots();
+
+  document.getElementById('objValue').textContent =
+    lastObjRaw===null ? '—' : (lastObjType==='percent' ? (lastObjRaw*100).toFixed(1)+'%' : fmt(lastObjRaw));
+  document.getElementById('solveTime').textContent = lastSolveMs===null ? '—' : lastSolveMs.toFixed(1)+' ms';
+
+  let sumOpt=0, sumCur=0;
+  slots.forEach(sl=>{
+    let optTotal = 0, curTotal = 0;
+    state.strategies.forEach((s,i)=>{
+      optTotal += unitMargin(s, sl) * (lastOptimalScales[i] || 0);
+      curTotal += unitMargin(s, sl) * currentScale(s);
+    });
+    sumOpt += optTotal/cap;
+    sumCur += curTotal/cap;
+  });
+
+  const avgOpt = (sumOpt/slots.length)*100, avgCur=(sumCur/slots.length)*100, diff=avgOpt-avgCur;
+  document.getElementById('avgUtilCompare').innerHTML =
+    avgCur.toFixed(1)+'% → '+avgOpt.toFixed(1)+'% <span style="font-size:13px;" class="'+(diff>=0?'delta-pos':'delta-neg')+'">('+(diff>=0?'+':'')+diff.toFixed(1)+'pp)</span>';
+}
+
+// ---------- DTE HEURISTIC (WIP tab) ----------
+function renderHeuristic(){
+  const m0 = num(document.getElementById('m0dte').value);
+  const dte = num(document.getElementById('targetDte').value);
+  const c = num(document.getElementById('offsetC').value)||1;
+  const exp = num(document.getElementById('exponent').value)||0.5;
+  const ratio = Math.pow((dte+c)/c, exp);
+  document.getElementById('heurResult').textContent = fmt(m0*ratio);
+  document.getElementById('heurRatio').textContent = 'ratio to 0DTE: ×'+ratio.toFixed(2);
+  const svg = document.getElementById('curveSvg');
+  const w=300,h=100,maxDte=30; let maxRatio=0; const pts=[];
+  for(let d=0; d<=maxDte; d++){ const r=Math.pow((d+c)/c,exp); maxRatio=Math.max(maxRatio,r); pts.push(r); }
+  const path = pts.map((r,i)=>{ const x=(i/maxDte)*w; const y=h-(r/maxRatio)*(h-14)-4; return (i===0?'M':'L')+x.toFixed(1)+','+y.toFixed(1); }).join(' ');
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  const dim = getComputedStyle(document.documentElement).getPropertyValue('--line').trim();
+  svg.innerHTML = `<line x1="0" y1="${h-4}" x2="${w}" y2="${h-4}" stroke="${dim}" stroke-width="1"/><path d="${path}" fill="none" stroke="${accent}" stroke-width="2"/>`;
+}
+['m0dte','targetDte','offsetC','exponent'].forEach(id=> document.getElementById(id).addEventListener('input', renderHeuristic));
+
+// ---------- COLLAPSIBLE PANELS ----------
+// Generic: every .panel's first child is its <h2>; everything after that gets
+// wrapped into a .panel-body that a caret button (prepended into the h2) can hide.
+function setupCollapsiblePanels(){
+  document.querySelectorAll('.panel').forEach(panel=>{
+    if(panel.dataset.collapsible === 'done') return;
+    const heading = panel.querySelector(':scope > h2');
+    if(!heading) return;
+
+    const body = document.createElement('div');
+    body.className = 'panel-body';
+    const toMove = [];
+    let sib = heading.nextSibling;
+    while(sib){ toMove.push(sib); sib = sib.nextSibling; }
+    toMove.forEach(n => body.appendChild(n));
+    panel.appendChild(body);
+
+    const toggle = document.createElement('button');
+    toggle.className = 'panel-collapse-toggle';
+    toggle.textContent = '▾';
+    toggle.title = 'Collapse this section';
+    toggle.addEventListener('click', (e)=>{
+      e.stopPropagation();
+      const collapsed = panel.classList.toggle('collapsed');
+      toggle.textContent = collapsed ? '▸' : '▾';
+      toggle.title = collapsed ? 'Expand this section' : 'Collapse this section';
+    });
+    heading.insertBefore(toggle, heading.firstChild);
+    panel.dataset.collapsible = 'done';
+  });
+}
+
+loadState();
+applyDomBackedFields();
+document.getElementById('marginModeDteBtn').classList.toggle('active', state.marginInputMode!=='independent');
+document.getElementById('marginModeIndepBtn').classList.toggle('active', state.marginInputMode==='independent');
+render();
+refreshHorizonLock();
+refreshObjectiveUI();
+renderHeuristic();
+renderFormulation();
+setupCollapsiblePanels();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Where the backtest engine lives, and what interpreter runs it.
+#
+# This is the only machine-specific file in the project. Everything else is
+# portable.
+
+[backtest_engine]
+# Root of the backtest engine repository.
+repo = "/home/oem/Documents/unit_tasks/IND_short_vol/HFT-Options-EIS-Global"
+
+# Interpreter the backtests run under. Absolute, or relative to `repo`.
+# It needs the backtest engine's dependencies, not this project's: the
+# optimization engine needs Python 3.10+, while the backtest engine runs on 3.9.
+python = "eis_env/bin/python"

@@ -50,9 +50,10 @@ Things that are machine-specific inside the backtest engine and are **not**
 managed by this project:
 
 - `eis_env` (or whatever interpreter you point `config.toml` at) and its packages
-- the preprocessed data directories, e.g.
-  `/…/IND_short_vol/preproc_data/NIFTY/` and `…/SENSEX/`, which the strategy
-  classes name in their `data_dir` attribute
+- the preprocessed data directories, which the strategy classes name in their
+  `data_dir` attribute. They are **not under a common parent** — today NIFTY
+  points at `/…/IND_short_vol/preproc_data/NIFTY/` and SENSEX at
+  `/…/IND_backtest/SENSEX/`, so check both
 - anything the engine reads by absolute path
 
 If the data lives elsewhere on the server, update `data_dir` in
@@ -104,6 +105,10 @@ specific lines.
 Run a single control job before committing to a large sweep. This exercises
 every moving part: the tree, the formatter, the rewrite, both subprocesses, and
 the output layout.
+
+It **rewrites the engine's constants file** — take the snapshot in step 5 first,
+and do not run it while any other backtest is in flight against the same
+checkout.
 
 ```bash
 ./gopt_env/bin/python - <<'PY'

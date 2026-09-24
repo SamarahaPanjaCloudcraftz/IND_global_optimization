@@ -9,11 +9,11 @@ This project decides **what to backtest**. It does not backtest anything itself:
 it produces complete configs, hands them one at a time to the tradelib backtest
 engine, and reads back what that engine wrote.
 
-Project root (the only place anything for this lives):
-
-```
-/home/oem/Documents/unit_tasks/IND_short_vol/global_optimisation_engine
-```
+Everything for this project lives under one directory, and nothing for it lives
+anywhere else. On the development machine that is
+`/home/oem/Documents/unit_tasks/IND_short_vol/global_optimisation_engine`; on a
+server it is wherever the repository was placed. Every path below is relative to
+that root, and every command is run from it.
 
 The backtest engine is a **separate repository** (`HFT-Options-EIS-Global`, also
 called tradelib). This project never modifies it except for one file, and that
@@ -179,9 +179,9 @@ that have actually bitten:
 - **`percent_hedge` is read by both hedging components, asymmetrically.** The
   gamma component multiplies by it unconditionally; the delta side only consults
   it when `custom_pct_to_hedge` is on, returning `1.0` otherwise.
-- **`gamma_threshold` is assigned twice** in the constants file (lines 58 and
-  299). `write_config`'s multiline regex rewrites both, which is what keeps them
-  in step — accidentally.
+- **`gamma_threshold` is assigned twice** in the constants file (lines 64 and
+  329 as of 2026-09-24). `write_config`'s multiline regex rewrites both, which
+  is what keeps them in step — accidentally.
 - **`write_config` raises if a parameter has no module-level assignment.** That
   is deliberate: silence there would run the baseline value while labelling the
   output with the swept one.

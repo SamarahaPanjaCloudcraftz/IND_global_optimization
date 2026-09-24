@@ -109,7 +109,13 @@ often:
   imports nothing from `engine`, `strategies` or `tradelib`, and performs no
   writes. Keep both properties true.
 
-Two editing hazards, both of which have caused real bugs here:
+**A strategy edit needs a dashboard restart.** `discover()` goes through
+`importlib.import_module` and so hits the `sys.modules` cache; Streamlit reruns
+the page but never re-executes those modules. Until the server process is
+restarted the dashboard shows the old counts and the old prefilled ranges, with
+nothing to say so.
+
+Three editing hazards, all of which have caused real bugs here:
 
 - **Replace by anchored match, not by line slice.** A slice-based replacement
   once left two definitions of the same function in the file, and the stale one

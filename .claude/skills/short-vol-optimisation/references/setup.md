@@ -138,19 +138,35 @@ the class, or overlay `start_date`/`end_date` on the config in the snippet.
 ## 7. Start the dashboards
 
 ```bash
-./gopt_env/bin/streamlit run dashboards/plan_and_start/streamlit_app.py --server.port 8502
-./gopt_env/bin/streamlit run dashboards/analyse_run/streamlit_app.py    --server.port 8503
+./gopt_env/bin/streamlit run dashboards/plan_and_start/streamlit_app.py \
+    --server.port 8502 --server.headless true --server.address 127.0.0.1
+./gopt_env/bin/streamlit run dashboards/analyse_run/streamlit_app.py \
+    --server.port 8503 --server.headless true --server.address 127.0.0.1
 ```
 
-On a headless server, tunnel rather than bind publicly:
+**Bind to loopback and tunnel.** Streamlit's default is `0.0.0.0`, and it will
+cheerfully print an external URL. The planning dashboard can start days of
+compute and the analysis dashboard exposes P&L, so neither belongs on a public
+interface without something in front of it that authenticates.
 
 ```bash
 ssh -N -L 8502:localhost:8502 -L 8503:localhost:8503 user@server
 ```
 
-Then open `http://localhost:8502`. If you must bind to an interface, put it
-behind something that authenticates — the planning dashboard can start days of
-compute and the analysis dashboard exposes P&L.
+Then open `http://localhost:8502`.
+
+### Restart the planning dashboard after editing a strategy
+
+`discover()` imports the strategy modules with `importlib.import_module`, which
+hits Python's `sys.modules` cache. Streamlit reruns the *page* on every
+interaction, but it does not re-execute those modules — so an edit to
+`dow_condor.py` or either underlying's file has **no effect on a running
+dashboard**, and the job counts and prefilled ranges stay at their old values
+with nothing to indicate it.
+
+Kill the process and start it again. This has already caused one round of
+"why are these numbers still wrong". The analysis dashboard is unaffected — it
+imports no strategy code.
 
 For fully headless operation with no dashboard at all, see
 `running-a-sweep.md` § "Without the dashboard".

@@ -26,8 +26,12 @@ class Sensex(DowCondor):
     hedge_pct = [1.0]
     gamma_threshold = 0.04
 
+    # Float endpoints deliberately: `spread` rounds a range to integers when
+    # both ends are integers, which is right for strike counts and day offsets
+    # but not for a threshold. Written as ints, -1 to -4 over five steps
+    # collapses onto four distinct values.
     gamma_threshold_ranges = {
-        0: (-1, -4, 5), 1: (-2, -5, 5), 2: (-3, -6, 5),
+        0: (-1.0, -4.0, 5), 1: (-2.0, -5.0, 5), 2: (-3.0, -6.0, 5),
         3: (-4.5, -8.5, 5), 4: (-0.5, -2.5, 5),
     }
     hedge_constant_ranges = {

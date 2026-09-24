@@ -241,6 +241,20 @@ spaced values by `plan_io.spread`. Times interpolate through seconds-of-day and
 round to the minute; integer endpoints stay integers, so a count of strikes
 never becomes 4.666.
 
+**The integer rule silently costs you values.** If both endpoints are integers,
+`spread` rounds every step and then drops duplicates — so a narrow band asks for
+five values and gets four. `(-1, -4, 5)` yields `-1, -2, -3, -4`. That is right
+for strike counts and day offsets and wrong for a continuous quantity that
+happens to be written without a decimal point, and it is invisible unless you
+compare the job count to what you expected. Write such a range with float
+endpoints: `(-1.0, -4.0, 5)` gives `-1.0, -1.75, -2.5, -3.25, -4.0`. Rounding is
+also Python's banker's rounding, so `-77.5` goes to `-78` while `-112.5` goes to
+`-112` — the collapse is not even symmetric.
+
+This is why the gamma threshold ranges on both strategies are written as floats.
+Hedge constants in bps and the `static wings` percentage are still integer
+ranges, and are rounded the same way.
+
 Defaults come from the `ranges` sheet of `ind short vol.xlsx` and live on the
 strategy classes. `strategy.ranges` emits them keyed by **leaf path, prefix, or
 bare parameter name**, most specific winning — so a range that is the same

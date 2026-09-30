@@ -10,12 +10,13 @@ needs beyond the selected variants is its own business.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pandas as pd
 import streamlit as st
 
 import charts
+import ranking
 import series
 
 PANELS: dict[str, Callable] = {}
@@ -37,6 +38,10 @@ class View:
     frames: dict[str, pd.DataFrame]   # variant label -> (date, equity)
     colours: dict[str, str]
     dark: bool
+    margins: dict[str, float] = field(default_factory=dict)
+    reference: float = 1.0      # margin that money in the ranking is expressed at
+    branches: dict[str, tuple[str, str]] = field(default_factory=dict)  # key -> (mode, label)
+    baseline: str | None = None  # key of this weekday's baseline, when the stage has one
 
     def key(self, suffix: str) -> str:
         return f"{self.axis}:{suffix}"
@@ -60,17 +65,27 @@ def _grain(view: View, suffix: str) -> str:
     ) or "Daily"
 
 
-@panel("Summary")
-def _summary(view: View) -> None:
-    rows = [{"Variant": label, **series.summary(frame)}
-            for label, frame in view.frames.items()]
-    table = pd.DataFrame(rows)
-    money = [c for c in table.columns
-             if c in ("Final P&L", "Max drawdown", "Best day", "Worst day")]
-    st.dataframe(
-        table, hide_index=True,
-        column_config={c: st.column_config.NumberColumn(c, format="%,.0f") for c in money},
-    )
+@panel("Ranking")
+def _ranking(view: View) -> None:
+    st.caption("P&L and drawdown are in ₹, as each variant would earn on the baseline's "
+               "margin. Ranks: 1 is best, ties share the average. Composite is the "
+               "weighted sum of the three ranks — lower is better.")
+    table = ranking.table(view.frames, view.margins, view.reference)
+    keys = table["Variant"].copy()
+    if any(middle for middle, _ in view.branches.values()):
+        table.insert(0, "Mode / Method", [view.branches.get(k, ("", k))[0] or "—" for k in keys])
+        table["Variant"] = [view.branches.get(k, ("", k))[1] for k in keys]
+    rupees = "{:,.0f}"
+    formats = {"Final P&L": rupees, "Max drawdown": rupees, "Sortino": "{:.2f}"}
+    formats.update({c: "{:g}" for c in table.columns if c.endswith("rank") or c == "Composite"})
+
+    # The baseline is ranked with everything else; its row is repeated above the
+    # table so the reference numbers are in view however far down it ranks.
+    if view.baseline in set(keys):
+        row = table[keys == view.baseline]
+        st.markdown(f"**Baseline** — ranked {int(row.index[0]) + 1} of {len(table)}")
+        st.dataframe(row.style.format(formats, na_rep="—"), hide_index=True, width="stretch")
+    st.dataframe(table.style.format(formats, na_rep="—"), hide_index=True, width="stretch")
 
 
 @panel("Equity")
@@ -92,12 +107,10 @@ def _drawdown(view: View) -> None:
 @panel("P&L bars")
 def _pnl_bars(view: View) -> None:
     grain = _grain(view, "pnl-grain")
-    tidy = pd.concat(
-        [series.pnl(frame, grain).assign(variant=label)
-         for label, frame in view.frames.items()],
-        ignore_index=True,
-    )
-    st.altair_chart(charts.pnl_bars(tidy, f"{grain} P&L", view.dark))
+    for label, frame in view.frames.items():
+        st.markdown(f"**{label}**")
+        st.altair_chart(charts.pnl_bars(series.pnl(frame, grain), f"{grain} P&L",
+                                        view.dark, height=180))
 
 
 @panel("Difference")
@@ -115,6 +128,6 @@ def _difference(view: View) -> None:
         return
     frame = series.difference(view.frames[left], view.frames[right], grain)
     st.caption(f"**A − B** · positive means *{left}* earned more in that period.")
-    st.altair_chart(charts.pnl_bars(frame, f"{grain} difference", view.dark, facet=False))
+    st.altair_chart(charts.pnl_bars(frame, f"{grain} difference", view.dark))
     total = frame["pnl"].sum()
     st.metric("Total difference over the period", f"{total:,.0f}", border=True)

@@ -15,6 +15,37 @@ import pandas as pd
 GRAINS = {"Daily": "D", "Weekly": "W-FRI", "Monthly": "ME"}
 
 
+def window(equity: pd.DataFrame, start, end) -> pd.DataFrame:
+    """The curve between start and end inclusive, re-based to zero at start.
+
+    Re-basing subtracts the equity already earned before the window, so every
+    metric of the result describes only what happened inside it.
+    """
+    if equity.empty:
+        return equity
+    dates = equity["date"]
+    earlier = equity.loc[dates < pd.Timestamp(start), "equity"]
+    offset = earlier.iloc[-1] if not earlier.empty else 0.0
+    inside = equity[(dates >= pd.Timestamp(start)) & (dates <= pd.Timestamp(end))]
+    return inside.assign(equity=inside["equity"] - offset).reset_index(drop=True)
+
+
+def selling_day(equity: pd.DataFrame, weekday: int) -> pd.DataFrame:
+    """Only the P&L made on one weekday, re-cumulated into an equity curve.
+
+    Each day's P&L is the curve's first difference, so this keeps the days that
+    fall on `weekday` and sums them — what the book earned on its selling days
+    alone, leaving out every day it was merely held.
+    """
+    if equity.empty:
+        return equity
+    steps = equity["equity"].diff()
+    steps.iloc[0] = equity["equity"].iloc[0]
+    keep = equity["date"].dt.weekday == weekday
+    return pd.DataFrame({"date": equity["date"][keep],
+                         "equity": steps[keep].cumsum()}).reset_index(drop=True)
+
+
 def pnl(equity: pd.DataFrame, grain: str = "Daily") -> pd.DataFrame:
     """P&L per period, as (date, pnl).
 
@@ -50,20 +81,3 @@ def difference(left: pd.DataFrame, right: pd.DataFrame, grain: str = "Daily") ->
     b = pnl(right, grain).set_index("date")["pnl"]
     both = a.subtract(b, fill_value=0.0)
     return both.rename("pnl").reset_index()
-
-
-def summary(equity: pd.DataFrame) -> dict:
-    """The numbers worth putting beside the curves."""
-    if equity.empty:
-        return {}
-    daily = pnl(equity, "Daily")["pnl"]
-    trough = drawdown(equity)["drawdown"].min()
-    traded = daily[daily != 0]
-    return {
-        "Final P&L": equity["equity"].iloc[-1],
-        "Max drawdown": trough,
-        "Best day": daily.max(),
-        "Worst day": daily.min(),
-        "Days with P&L": int(traded.size),
-        "Positive days": int((traded > 0).sum()),
-    }

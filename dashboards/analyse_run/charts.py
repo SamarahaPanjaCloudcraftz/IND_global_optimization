@@ -28,7 +28,7 @@ GAIN_LIGHT, LOSS_LIGHT = "#2a78d6", "#e34948"
 GAIN_DARK, LOSS_DARK = "#3987e5", "#e66767"
 
 MONEY = ",.0f"
-HEIGHT = 260
+HEIGHT = 400
 # Hues are never cycled: a ninth line would repeat a slot and read as a series
 # it is not. Past this many, the line charts show the first few and say so.
 MAX_LINES = len(SERIES_LIGHT)
@@ -64,10 +64,10 @@ def _lines(frames: dict[str, pd.DataFrame], value: str, title: str,
         x=alt.X("date:T", title=None),
         y=alt.Y(f"{value}:Q", title=title, axis=alt.Axis(format="~s")),
         color=alt.Color("variant:N", title=None, scale=_scale(assigned),
-                        legend=alt.Legend(orient="bottom", columns=1)
+                        legend=alt.Legend(orient="bottom", columns=1, labelLimit=1000)
                         if len(drawn) > 1 else None),
     )
-    line = base.mark_line(strokeWidth=2, interpolate="monotone")
+    line = base.mark_line(strokeWidth=2, interpolate="step-after")
     points = base.mark_point(size=60, filled=True, opacity=0).add_params(hover)
     marks = base.mark_point(size=60, filled=True).transform_filter(hover).encode(
         tooltip=[alt.Tooltip("date:T", title="Date"),
@@ -76,7 +76,7 @@ def _lines(frames: dict[str, pd.DataFrame], value: str, title: str,
     )
     rule = alt.Chart(tidy).mark_rule(strokeWidth=1, opacity=0.35).encode(
         x="date:T").transform_filter(hover)
-    return (line + points + rule + marks).properties(height=HEIGHT)
+    return (line + points + rule + marks).properties(height=HEIGHT, width="container")
 
 
 def equity(frames: dict[str, pd.DataFrame], assigned: dict[str, str]) -> alt.Chart:
@@ -89,18 +89,13 @@ def drawdown(frames: dict[str, pd.DataFrame], assigned: dict[str, str]) -> alt.C
     return _lines(frames, "drawdown", "Drawdown", assigned)
 
 
-def pnl_bars(tidy: pd.DataFrame, title: str, dark: bool, facet: bool = True) -> alt.Chart:
-    """P&L per period, coloured by sign. One row per variant when faceting."""
+def pnl_bars(tidy: pd.DataFrame, title: str, dark: bool, height: int = HEIGHT) -> alt.Chart:
+    """P&L per period, coloured by sign."""
     gain, loss = (GAIN_DARK, LOSS_DARK) if dark else (GAIN_LIGHT, LOSS_LIGHT)
-    chart = alt.Chart(tidy).mark_bar(cornerRadiusEnd=4).encode(
+    return alt.Chart(tidy).mark_bar(cornerRadiusEnd=4).encode(
         x=alt.X("date:T", title=None),
         y=alt.Y("pnl:Q", title=title, axis=alt.Axis(format="~s")),
         color=alt.condition(alt.datum.pnl >= 0, alt.value(gain), alt.value(loss)),
         tooltip=[alt.Tooltip("date:T", title="Period"),
-                 alt.Tooltip("pnl:Q", title=title, format=MONEY)]
-        + ([alt.Tooltip("variant:N", title="Variant")] if "variant" in tidy else []),
-    ).properties(height=HEIGHT if not facet else 140)
-    if facet and "variant" in tidy and tidy["variant"].nunique() > 1:
-        return chart.facet(row=alt.Row("variant:N", title=None,
-                                       header=alt.Header(labelAnchor="start")))
-    return chart
+                 alt.Tooltip("pnl:Q", title=title, format=MONEY)],
+    ).properties(height=height, width="container")

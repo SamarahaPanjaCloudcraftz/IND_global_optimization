@@ -13,6 +13,7 @@ derived here reconciles with the engine's own number by construction.
 import json
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -20,6 +21,7 @@ import streamlit as st
 
 PLAN_FILE = "plan.json"
 CONTROL = "control"
+COMBINATIONS = "combinations"
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,10 @@ def jobs(run: str, stage: str) -> list[Job]:
     changes = _changes(root)
     found = []
     for result in sorted(root.rglob("result.json")):
+        # Combination backtests live under the stage too, but belong to the
+        # combine view, not to any axis.
+        if COMBINATIONS in result.relative_to(root).parts:
+            continue
         directory = result.parent
         axis = str(directory.parent.relative_to(root))
         found.append(Job(
@@ -78,7 +84,7 @@ def _changes(stage_root: Path) -> dict[str, str]:
         grouped[entry["axis"]].append(entry)
 
     labels = {}
-    for group in grouped.values():
+    for axis, group in grouped.items():
         if len(group) > 1:
             varies = [key for key in group[0]["config"]
                       if len({json.dumps(e["config"].get(key), sort_keys=True, default=str)
@@ -86,10 +92,52 @@ def _changes(stage_root: Path) -> dict[str, str]:
         else:
             varies = [key for key, value in group[0]["config"].items()
                       if control.get(key) != value]
+        day = _weekday_key(axis)
         for entry in group:
-            named = ", ".join(f"{key}={entry['config'][key]}" for key in varies)
+            named = ", ".join(f"{key}={_for_day(entry['config'][key], day)}" for key in varies)
             labels[entry["hash"]] = named or "baseline"
     return labels
+
+
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+
+
+def _weekday_key(axis: str | None) -> str | None:
+    """"0".."4" when a branch tag ends in a weekday, else None."""
+    last = (axis or "").split("/")[-1]
+    return str(WEEKDAYS.index(last)) if last in WEEKDAYS else None
+
+
+def _for_day(value, day: str | None):
+    """A weekday-keyed dict reduced to the branch's own weekday.
+
+    Only that day's entry can vary within a weekday branch — the rest are
+    pinned — so it is the only part worth naming.
+    """
+    if day and isinstance(value, dict) and {"0", "1", "2", "3", "4"} <= set(value):
+        return value[day]
+    return value
+
+
+@st.cache_data(show_spinner=False)
+def period(run: str, stage: str) -> tuple[date, date] | None:
+    """The backtest period the plan ran, from its recorded baseline."""
+    plan = Path(run) / stage / PLAN_FILE
+    if not plan.exists():
+        return None
+    base = json.loads(plan.read_text()).get("baseline", {})
+    if "start_date" not in base or "end_date" not in base:
+        return None
+    return date.fromisoformat(base["start_date"]), date.fromisoformat(base["end_date"])
+
+
+@st.cache_data(show_spinner=False)
+def configs(run: str, stage: str) -> dict[str, dict]:
+    """digest -> the full config the plan recorded for that job."""
+    plan = Path(run) / stage / PLAN_FILE
+    if not plan.exists():
+        return {}
+    return {e["hash"]: e["config"] for e in json.loads(plan.read_text())["jobs"]}
 
 
 @st.cache_data(show_spinner=False)
@@ -113,21 +161,36 @@ def axes(found: list[Job]) -> list[str]:
     return tags + ([CONTROL] if any(job.axis == CONTROL for job in found) else [])
 
 
+def _last_row(path: Path) -> tuple[str, str] | None:
+    """(timestamp, portfolio_value) from a store file's final row.
+
+    Each file holds one trading day, so its final row is that day's close. Only
+    the header and the file's tail are read, not the day's ~750 minute rows.
+    """
+    with open(path, "rb") as handle:
+        header = handle.readline().decode().strip().split(",")
+        handle.seek(0, 2)
+        size = handle.tell()
+        handle.seek(max(0, size - 4096))
+        lines = [line for line in handle.read().decode().splitlines() if line.strip()]
+    last = lines[-1].split(",") if lines else header
+    if last == header:
+        return None
+    return last[header.index("timestamp")], last[header.index("portfolio_value")]
+
+
 @st.cache_data(show_spinner=False)
 def equity(job_path: str) -> pd.DataFrame:
     """End-of-day equity for one job, as (date, equity).
 
-    Daily rather than per-minute: the curve is ~18k rows a job at source and
-    every view here is daily or coarser.
+    Daily rather than per-minute: every view here is daily or coarser.
     """
-    files = sorted(Path(job_path).glob("consolidated_store/*.csv"))
-    if not files:
+    rows = [row for f in sorted(Path(job_path).glob("consolidated_store/*.csv"))
+            if (row := _last_row(f))]
+    if not rows:
         return pd.DataFrame(columns=["date", "equity"])
-    frames = [
-        pd.read_csv(f, usecols=["timestamp", "portfolio_value"], parse_dates=["timestamp"])
-        for f in files
-    ]
-    rows = pd.concat(frames, ignore_index=True).dropna(subset=["portfolio_value"])
-    rows["date"] = rows["timestamp"].dt.normalize()
-    daily = rows.groupby("date", as_index=False)["portfolio_value"].last()
-    return daily.rename(columns={"portfolio_value": "equity"})
+    daily = pd.DataFrame(rows, columns=["timestamp", "equity"])
+    daily["date"] = pd.to_datetime(daily["timestamp"]).dt.normalize()
+    daily["equity"] = pd.to_numeric(daily["equity"], errors="coerce")
+    daily = daily.dropna(subset=["equity"])
+    return daily.groupby("date", as_index=False)["equity"].last()

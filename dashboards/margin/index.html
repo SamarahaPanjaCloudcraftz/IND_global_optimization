@@ -11,6 +11,7 @@
   --bg:#0e1117; --panel:#151a23; --panel-2:#1b212c; --line:#252c38;
   --text:#e6e9ef; --text-dim:#8891a3; --accent:#e8a33d; --accent-2:#5b9dd9;
   --good:#4fae7c; --warn:#d9713c; --bad:#d1495b;
+  --nf:#5b9dd9; --bn:#a47de0; --sn:#e0a23d; /* strategy colour by index */
   --mono:'IBM Plex Mono','SF Mono',Consolas,monospace;
   --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
 }
@@ -19,12 +20,14 @@
   --bg:#f5f4f0; --panel:#ffffff; --panel-2:#faf9f6; --line:#e0ddd4;
   --text:#1c1c1a; --text-dim:#6b6b63; --accent:#b5721f; --accent-2:#2f6fa8;
   --good:#2f8f5c; --warn:#b5581f; --bad:#b53347; color-scheme: light;
+  --nf:#2f6fa8; --bn:#7a4fc0; --sn:#b8741a;
 }
 @media (prefers-color-scheme: light){
   :root:not([data-theme="dark"]){
     --bg:#f5f4f0; --panel:#ffffff; --panel-2:#faf9f6; --line:#e0ddd4;
     --text:#1c1c1a; --text-dim:#6b6b63; --accent:#b5721f; --accent-2:#2f6fa8;
     --good:#2f8f5c; --warn:#b5581f; --bad:#b53347; color-scheme: light;
+    --nf:#2f6fa8; --bn:#7a4fc0; --sn:#b8741a;
   }
 }
 *{box-sizing:border-box;}
@@ -186,6 +189,19 @@ th .info-icon{margin-left:4px;}
 .panel.collapsed h2{margin-bottom:0;border-bottom:none;padding-bottom:0;}
 
 footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
+
+/* ---- expiry-day cells in the "margin by strategy and day" report: hue by index,
+   strength by weekly (light) vs monthly (strong). ---- */
+.t-nf-w{--tone:var(--nf);--cell-pct:32%;}
+.t-nf-m{--tone:var(--nf);--cell-pct:58%;}
+.t-bn-w{--tone:var(--bn);--cell-pct:32%;}
+.t-bn-m{--tone:var(--bn);--cell-pct:58%;}
+.t-sn-w{--tone:var(--sn);--cell-pct:32%;}
+.t-sn-m{--tone:var(--sn);--cell-pct:58%;}
+/* only the expiry cell is filled; ID-scoped so the row-hover rule doesn't wash it out */
+#weekTypeReportBody td.expiry-cell{background:color-mix(in srgb, var(--tone) var(--cell-pct), var(--panel));font-weight:700;}
+
+
 </style>
 </head>
 <body>
@@ -196,8 +212,8 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
 
 <header>
   <h1>margin<span>alloc</span>desk</h1>
-  <div style="display:flex;gap:8px;">
-    <button class="theme-toggle" id="unitToggle">units: $</button>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <button class="theme-toggle" id="unitToggle">units: $</button><span class="info-icon" data-tip="Show amounts in $ or $ millions. Doesn’t change the solve.">?</span>
     <button class="theme-toggle" id="themeToggle">toggle theme</button>
   </div>
 </header>
@@ -218,7 +234,7 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
   <div class="calendar-fields">
     <div>
       <div class="field-row">
-        <label>Total margin capital ($)</label>
+        <label>Total margin capital ($)<span class="info-icon" data-tip="Most margin you can use on any single day.">?</span></label>
         <input type="number" id="totalCapital" autocomplete="off" value="10000000" step="100000">
       </div>
       <div class="field-row">
@@ -245,7 +261,7 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
         </select>
       </div>
       <div class="field-row" id="monthlyExpiryWeekRow" style="display:none;">
-        <label>Monthly expiry falls in week #</label>
+        <label>Monthly expiry falls in week #<span class="info-icon" data-tip="Which of the 4 weeks has the monthly expiry. Monthly strategies double only in that week.">?</span></label>
         <select id="monthlyExpiryWeek" autocomplete="off">
           <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option>
         </select>
@@ -275,7 +291,7 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
         <button class="seg-btn" data-obj="riskadj" id="objRiskBtn">Risk-adjusted return<span class="info-icon" data-tip="Aim for the best return for the risk taken, using the expected return and risk numbers you enter per strategy — as dollar amounts (not %) for one full run of the strategy, over the period matching your horizon (a week, or the whole month).">?</span></button>
       </div>
       <div id="lambdaRow" class="field-row" style="display:none;margin-top:10px;max-width:280px;">
-        <label>Risk aversion λ</label>
+        <label>Risk aversion λ<span class="info-icon" data-tip="How much risk counts against return. Score = return − λ × risk. 0 ignores risk; higher avoids it.">?</span></label>
         <input type="number" id="riskLambda" autocomplete="off" value="1" step="0.1">
       </div>
       <div class="notice" id="riskNotice" style="display:none;">Expected return &amp; risk columns are now shown in the strategy table below.</div>
@@ -319,7 +335,7 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
 
   <div class="solve-row">
     <button class="solve-btn" id="solveBtn">Solve MILP</button>
-    <span class="status-badge" id="statusBadge">not solved yet</span>
+    <span class="status-badge" id="statusBadge">not solved yet</span><span class="info-icon" data-tip="optimal: best answer found. infeasible: your limits can’t all be met. unbounded: a strategy earns but uses no margin. invalid capital: capital must be above $0.">?</span>
   </div>
 </div>
 
@@ -338,14 +354,13 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
       <tr>
         <th style="text-align:left;">strategy</th>
         <th style="text-align:left;">index<span class="info-icon" data-tip="Which index this strategy trades. Sets its expiry day and which index-level cap it counts against.">?</span></th>
-        <th>overnight<span class="info-icon" data-tip="Does the position stay open past today's close? This decides which &quot;type&quot; values you can pick.">?</span></th>
-        <th style="text-align:left;">type<span class="info-icon" data-tip="Daily and weekly strategies double their margin every time the expiry day comes around. Monthly strategies only double in the one week you've marked as the expiry week.">?</span></th>
-        <th>current margin ($)<span class="info-icon" data-tip="What you actually have deployed today on this strategy's heaviest day. Just for comparison — the solver doesn't use this number.">?</span></th>
-        <th>min $/strat<span class="info-icon" data-tip="The least this strategy must use in margin every day, if it's run at all. Leave blank for no floor.">?</span></th>
-        <th>max $/strat<span class="info-icon" data-tip="The most this strategy alone is allowed to use in margin on any single day. Leave blank for no limit.">?</span></th>
+        <th style="text-align:left;">type<span class="info-icon" data-tip="Weekly or monthly. In DTE-curve mode, weekly strategies double their margin on the index's expiry day every week; monthly strategies only double in the one week you've marked as the expiry week. In Independent mode you type the real figures, so only the monthly expiry-week doubling is added.">?</span></th>
+        <th class="dtecol show"><span class="unit-label" data-tpl="margin @0DTE ({u})">margin @0DTE ($)</span><span class="info-icon" data-tip="Margin for one lot on its expiry day. Every other weekday's margin is worked out from this automatically.">?</span></th>
+        <th class="indepcol" style="text-align:left;"><span class="unit-label" data-tpl="margin by weekday ({u}, m/t/w/t/f)">margin by weekday ($, m/t/w/t/f)</span><span class="info-icon" data-tip="Five independent dollar figures, one per weekday, comma-separated — no formula, no shared curve. Type the margin you actually post each weekday in a normal week, expiry-day spike included; it is used as-is. For a monthly strategy, type a non-expiry week — the ×2 for its monthly expiry week is added automatically.">?</span></th>
+        <th><span class="unit-label" data-tpl="min {u}/strat">min $/strat</span><span class="info-icon" data-tip="The least this strategy must use in margin every day, if it's run at all. Leave blank for no floor.">?</span></th>
+        <th><span class="unit-label" data-tpl="max {u}/strat">max $/strat</span><span class="info-icon" data-tip="The most this strategy alone is allowed to use in margin on any single day. Leave blank for no limit.">?</span></th>
         <th class="dtecol show" style="text-align:left;">lots (m,t,w,t,f)<span class="info-icon" data-tip="Lots held each weekday, e.g. &quot;12111&quot; means 1 lot Monday, 2 Tuesday, 1 the rest of the week.">?</span></th>
-        <th class="dtecol show">margin @0DTE<span class="info-icon" data-tip="Margin for one lot on its expiry day. Every other weekday's margin is worked out from this automatically.">?</span></th>
-        <th class="indepcol" style="text-align:left;">margin by weekday ($, m/t/w/t/f)<span class="info-icon" data-tip="Five independent dollar figures, one per weekday, comma-separated — no formula, no shared curve. The expiry-day ×2 multiplier still applies on top of whatever you enter here.">?</span></th>
+        <th><span class="unit-label" data-tpl="current margin ({u})">current margin ($)</span><span class="info-icon" data-tip="What you actually have deployed today on this strategy's heaviest day. Just for comparison — the solver doesn't use this number.">?</span></th>
         <th class="riskcol"><span id="expReturnLabel">exp. return</span><span class="info-icon" data-tip="Only used when the objective is &quot;Risk-adjusted return&quot;. Must be a dollar amount (not a %), for one full run of this strategy at scale 1 — over one week if horizon is Weekly, or the whole month if horizon is Monthly.">?</span></th>
         <th class="riskcol"><span id="riskLabel">risk</span><span class="info-icon" data-tip="Only used when the objective is &quot;Risk-adjusted return&quot;. Same units and same period as expected return — a dollar risk (e.g. standard deviation of P&amp;L), not a %.">?</span></th>
         <th></th>
@@ -362,10 +377,10 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
       <input type="file" id="fileUpload" accept=".xlsx,.xls,.csv">
     </label>
     <button class="add-row-btn" id="downloadSample">⭳ download sample .xlsx</button>
-    <span class="info-icon" data-tip="Your file needs these column headers: strategy, index, overnight, type, current_margin, min_margin, max_margin, lots (like 12111), margin_0dte. Add expected_return and risk too if you're using the risk-adjusted objective. For 'Independent by weekday' mode, add margin_mon, margin_tue, margin_wed, margin_thu, margin_fri instead.">?</span>
+    <span class="info-icon" data-tip="Your file needs these column headers: strategy, index, type (weekly or monthly), margin_0dte, min_margin, max_margin, lots (like 12111), current_margin. Add expected_return and risk too if you're using the risk-adjusted objective. For 'Independent by weekday' mode, add margin_mon, margin_tue, margin_wed, margin_thu, margin_fri instead.">?</span>
   </div>
   <div class="table-actions" style="margin-top:6px;">
-    <button class="add-row-btn" id="loadSample">load sample strategies (NF/BN/SN × monthly + non-monthly)</button>
+    <button class="add-row-btn" id="loadSample">load sample strategies (NF/BN/SN × weekly + monthly)</button>
     <button class="add-row-btn" id="resetStrats" style="border-color:var(--bad);color:var(--bad);">reset strategies</button>
   </div>
 </div>
@@ -383,6 +398,7 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
       <option value="current">Current allocation</option>
       <option value="optimal">Optimal allocation (last solve)</option>
     </select>
+    <span class="info-icon" data-tip="Current: sized from your current margin column. Optimal: the last solve.">?</span>
   </h2>
   <div id="reportEmptyMsg" class="empty-state" style="display:none;">Run "Solve MILP" above first — there's no optimal allocation to show yet.</div>
   <div class="table-scroll" id="reportTableWrap">
@@ -393,8 +409,44 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
   </div>
 </div>
 
+<div class="panel" id="sizingPanel">
+  <h2>lots &amp; trade interval<span class="info-icon" data-tip="Turns the last solve into lots and a trade interval per strategy. Margin scales with lots ÷ interval.">?</span></h2>
+  <div class="setup-label">Reference per index + type<span class="info-icon" data-tip="At these lots and this trade interval, margin at 0 DTE is this amount.">?</span></div>
+  <div class="table-scroll" style="max-width:640px;">
+  <table>
+    <thead><tr>
+      <th style="text-align:left;">index + type</th>
+      <th>ref lots</th>
+      <th>ref interval (s)</th>
+      <th><span id="sizingRefMarginLabel">0DTE margin ($)</span></th>
+      <th></th>
+    </tr></thead>
+    <tbody id="sizingRefBody"></tbody>
+  </table>
+  </div>
+  <div class="table-actions" id="sizingAddWrap" style="display:none;">
+    <select id="sizingAddSel" autocomplete="off" style="background:var(--panel-2);border:1px solid var(--line);color:var(--text);font-family:var(--mono);font-size:12px;padding:6px 10px;border-radius:5px;"></select>
+    <button class="add-row-btn" id="sizingAddBtn">+ add reference row</button>
+  </div>
+  <div class="setup-label" style="margin-top:18px;">Per strategy, from the last solve</div>
+  <div id="sizingEmptyMsg" class="empty-state">Run "Solve MILP" above first.</div>
+  <div class="table-scroll" id="sizingOutWrap" style="display:none;">
+  <table>
+    <thead><tr>
+      <th style="text-align:left;">strategy</th>
+      <th style="text-align:left;">index + type</th>
+      <th>allocated (peak day)<span class="info-icon" data-tip="Most margin this strategy uses on any one day, from the last solve.">?</span></th>
+      <th>× reference<span class="info-icon" data-tip="How many times the reference margin this strategy runs at.">?</span></th>
+      <th>lots<span class="info-icon" data-tip="Defaults to the reference lots. Type a different number to see the interval change.">?</span></th>
+      <th>trade interval<span class="info-icon" data-tip="Ref interval × (lots ÷ ref lots) ÷ (× reference).">?</span></th>
+    </tr></thead>
+    <tbody id="sizingOutBody"></tbody>
+  </table>
+  </div>
+</div>
+
 <div class="panel">
-  <h2>problem formulation</h2>
+  <h2>problem formulation<span class="info-icon" data-tip="The exact model sent to the solver, rebuilt from your inputs.">?</span></h2>
   <pre class="formulation" id="formulationBlock"></pre>
 </div>
 
@@ -402,9 +454,9 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
 
 <div id="solverOutput" style="display:none;">
   <div class="summary-cards">
-    <div class="summary-card"><div class="label">objective value</div><div class="value" id="objValue">—</div></div>
-    <div class="summary-card"><div class="label">avg utilization (current → optimal)</div><div class="value" id="avgUtilCompare">—</div></div>
-    <div class="summary-card"><div class="label">solve time</div><div class="value" id="solveTime">—</div></div>
+    <div class="summary-card"><div class="label">objective value<span class="info-icon" id="objValueTip" data-tip="What the solver maximised. Solve to see what it measures.">?</span></div><div class="value" id="objValue">—</div></div>
+    <div class="summary-card"><div class="label">avg utilization (current → optimal)<span class="info-icon" data-tip="Average share of capital in use per day. Left: current allocation. Right: last solve.">?</span></div><div class="value" id="avgUtilCompare">—</div></div>
+    <div class="summary-card"><div class="label">solve time<span class="info-icon" data-tip="How long the solver took.">?</span></div><div class="value" id="solveTime">—</div></div>
   </div>
 </div>
 
@@ -473,11 +525,13 @@ const DEFAULTS = {
   minNF: 0, minBN: 0, minSN: 0,
   minTotalMargin: 0,
   offsetC: 1,
-  exponent: 0.5
+  exponent: 0.5,
+  sizingRef: {}, // 'NF|weekly' -> { lots, intervalSec, margin }: reference for the lots & trade interval section
+  sizingRows: ['NF|weekly','NF|monthly','BN|weekly','BN|monthly','SN|weekly','SN|monthly'] // reference rows shown
 };
 let state = JSON.parse(JSON.stringify(DEFAULTS));
 let lastOptimalScales = null; // per-strategy scale factors from the last successful solve; invalidated on any edit
-let lastSolveMs = null, lastObjType = null, lastObjRaw = null; // raw last-solve numbers, kept so the display can be reformatted (e.g. unit toggle) without re-solving
+let lastSolveMs = null, lastObjType = null, lastObjRaw = null, lastObjective = null, lastSlotCount = null; // raw last-solve numbers, kept so the display can be reformatted (e.g. unit toggle) without re-solving
 let displayUnit = 'raw'; // 'raw' | 'millions'
 
 // fields whose value lives in a plain DOM input/select but must be forced
@@ -485,10 +539,18 @@ let displayUnit = 'raw'; // 'raw' | 'millions'
 // memory (which otherwise silently overrides the intended defaults)
 const DOM_BACKED_FIELDS = ['totalCapital','nfExpiry','bnExpiry','snExpiry','monthlyExpiryWeek','riskLambda','capNF','capBN','capSN','minNF','minBN','minSN','minTotalMargin','offsetC','exponent'];
 
+// The first version of the lots & trade interval section stored the reference
+// interval in minutes as `interval`; it is now seconds, as `intervalSec`.
+function migrateSizingRef(){
+  Object.values(state.sizingRef || {}).forEach(ref => {
+    if(ref.interval !== undefined && ref.intervalSec === undefined) ref.intervalSec = num(ref.interval) * 60;
+    delete ref.interval;
+  });
+}
 function loadState(){
   try{
     const saved = localStorage.getItem('marginDeskStateV5');
-    if(saved){ const parsed = JSON.parse(saved); if(parsed && parsed.strategies) state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), parsed); }
+    if(saved){ const parsed = JSON.parse(saved); if(parsed && parsed.strategies){ state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), parsed); state.strategies.forEach(normalizeStrategy); migrateSizingRef(); } }
   }catch(e){ console.warn('no saved state', e); }
 }
 function saveState(){
@@ -514,6 +576,22 @@ function fmtNum(n){
   return Math.round(n).toLocaleString('en-US');
 }
 function num(v){ return Number(v)||0; }
+// Strategy-table dollar fields: state always holds full dollars. Under the "$M" units
+// toggle an input shows millions and a typed number is read as millions.
+function unitSym(){ return displayUnit === 'millions' ? '$M' : '$'; }
+function toDisplay(v){ const n = num(v); return displayUnit === 'millions' ? Number((n/1e6).toFixed(6)) : n; }
+function fromDisplay(v){ return displayUnit === 'millions' ? Math.round(num(v)*1e6) : num(v); }
+// Margin is money posted with the exchange and can never be negative. A negative
+// entry is set back to 0 and the user is warned, rather than letting it into the model.
+function nonNegativeInput(el, label){
+  const n = num(el.value);
+  if(n < 0){
+    el.value = 0;
+    showToast(label + ' cannot be negative — it has been set to 0.', true);
+    return 0;
+  }
+  return n;
+}
 
 function expiryDayFor(index){
   if(index==='NF') return document.getElementById('nfExpiry').value;
@@ -521,7 +599,30 @@ function expiryDayFor(index){
   if(index==='SN') return document.getElementById('snExpiry').value;
   return null;
 }
+// Strategy types are weekly or monthly only. Older saved state and files may
+// carry type 'daily' and an 'overnight' flag; daily was numerically identical to
+// weekly, so it is read as weekly, and the flag is dropped.
+function normalizeStrategy(s){
+  s.type = String(s.type||'').toLowerCase() === 'monthly' ? 'monthly' : 'weekly';
+  delete s.overnight;
+  return s;
+}
 function monthlyExpiryWeek(){ return Number(document.getElementById('monthlyExpiryWeek').value)||4; }
+
+// Colour of a strategy's expiry-day cell in the report: hue by index, strength by
+// weekly vs monthly.
+function toneClass(strat){
+  const idx = {NF:'nf', BN:'bn', SN:'sn'}[strat.index];
+  if(!idx) return '';
+  return 't-' + idx + '-' + (strat.type === 'monthly' ? 'm' : 'w');
+}
+// Column (0 = mon … 4 = fri) of a strategy's expiry day in the given week, or -1
+// for a monthly strategy outside its expiry week (its spike happens once a month).
+function expiryColFor(strat, weekNum){
+  if(!toneClass(strat)) return -1;
+  if(strat.type === 'monthly' && weekNum !== monthlyExpiryWeek()) return -1;
+  return WEEKDAYS.indexOf(expiryDayFor(strat.index));
+}
 
 // ---- day-slot handling ----
 function getSlots(){
@@ -546,8 +647,17 @@ function dteFor(weekday, expiryWeekday){
   if(wi<0 || ei<0) return 0;
   return (ei - wi + 5) % 5;
 }
+// Parse a numeric field, falling back to `def` only when the field is blank or
+// not a number. Unlike `num(v)||def`, an explicit 0 is honoured.
+function numOr(v, def){
+  if(v === '' || v === null || v === undefined) return def;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : def;
+}
 function globalCurve(){
-  return { c: num(document.getElementById('offsetC').value)||1, exp: num(document.getElementById('exponent').value)||0.5 };
+  // c keeps its fallback for 0: it is a denominator, so c = 0 is undefined.
+  // exponent = 0 is a legitimate flat curve and must be honoured.
+  return { c: num(document.getElementById('offsetC').value)||1, exp: numOr(document.getElementById('exponent').value, 0.5) };
 }
 // lots held on a given weekday, per unit of this strategy, from its lot-count string e.g. "12111"
 function lotsForWeekday(strat, wd){
@@ -563,6 +673,11 @@ function unitMargin(strat, slot){
   if(state.marginInputMode === 'independent'){
     raw = strat.indepMargins ? num(strat.indepMargins[wd]) : 0;
     if(raw === 0) return 0;
+    // Independent figures are the margin actually posted in a normal week,
+    // expiry-day spike included, so weekly strategies are used as-is.
+    // Only a monthly strategy's once-a-month expiry spike — which one row of
+    // five weekday figures cannot express — is applied below.
+    if(strat.type !== 'monthly') return raw;
   }else{
     const lots = lotsForWeekday(strat, wd);
     if(lots === 0) return 0;
@@ -575,7 +690,7 @@ function unitMargin(strat, slot){
   if(strat.type === 'monthly'){
     return (slotWeekNum(slot) === monthlyExpiryWeek()) ? raw*2 : raw;
   }
-  return raw*2; // daily/weekly: double every occurrence of the expiry weekday
+  return raw*2; // weekly: double every occurrence of the expiry weekday
 }
 // the dollar margin this strategy would need on its heaviest slot, at scale = 1
 // (used to translate a $-denominated "current margin" figure into an internal scale factor)
@@ -619,8 +734,8 @@ function refreshHorizonLock(){
   document.getElementById('monthlyExpiryWeekRow').style.display = state.horizon==='monthly' ? 'flex' : 'none';
 
   const period = state.horizon==='monthly' ? 'month' : 'week';
-  document.getElementById('expReturnLabel').textContent = 'exp. return ($/'+period+')';
-  document.getElementById('riskLabel').textContent = 'risk ($/'+period+')';
+  document.getElementById('expReturnLabel').textContent = 'exp. return ('+unitSym()+'/'+period+')';
+  document.getElementById('riskLabel').textContent = 'risk ('+unitSym()+'/'+period+')';
 }
 
 document.getElementById('horizonWeeklyBtn').addEventListener('click', ()=>{
@@ -662,6 +777,11 @@ document.getElementById('marginModeIndepBtn').addEventListener('click', ()=>{
 
 // ---------- STRATEGY TABLE ----------
 function render(){
+  // Header columns must follow the margin-input mode, same as the body cells below.
+  document.querySelectorAll('#stratTable thead .dtecol').forEach(th => th.classList.toggle('show', state.marginInputMode === 'dte'));
+  document.querySelectorAll('#stratTable thead .indepcol').forEach(th => th.classList.toggle('show', state.marginInputMode === 'independent'));
+  document.querySelectorAll('#stratTable .unit-label').forEach(el => { el.textContent = el.dataset.tpl.replace('{u}', unitSym()); });
+  const moneyStep = def => displayUnit === 'millions' ? 'any' : def;
   const tbody = document.getElementById('stratBody');
   tbody.innerHTML = '';
   document.getElementById('emptyTableMsg').style.display = state.strategies.length===0 ? 'block' : 'none';
@@ -672,92 +792,90 @@ function render(){
 
     const tdName = document.createElement('td');
     const nameInput = document.createElement('input');
-    nameInput.className = 'name-input'; nameInput.value = strat.name;
+    nameInput.className = 'name-input'; nameInput.dataset.field='name'; nameInput.value = strat.name;
     nameInput.addEventListener('input', e => { strat.name = e.target.value; saveState(); });
-    tdName.appendChild(nameInput); tr.appendChild(tdName);
+    tdName.appendChild(nameInput);
 
     const tdIdx = document.createElement('td');
-    const idxSel = document.createElement('select'); idxSel.className = 'idx-select';
+    const idxSel = document.createElement('select'); idxSel.className = 'idx-select'; idxSel.dataset.field='index';
     ['NF','BN','SN'].forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; if(strat.index===v)o.selected=true; idxSel.appendChild(o); });
     idxSel.addEventListener('change', e=>{ strat.index = e.target.value; saveState(); renderTotals(); renderFormulation(); });
-    tdIdx.appendChild(idxSel); tr.appendChild(tdIdx);
-
-    const tdOv = document.createElement('td');
-    const ovSel = document.createElement('select'); ovSel.className = 'bool-select';
-    [['no','No'],['yes','Yes']].forEach(([v,label])=>{ const o=document.createElement('option'); o.value=v; o.textContent=label; if((strat.overnight?'yes':'no')===v)o.selected=true; ovSel.appendChild(o); });
-    ovSel.addEventListener('change', e=>{
-      strat.overnight = (e.target.value === 'yes');
-      if(!strat.overnight){ strat.type = 'daily'; }
-      else if(strat.type === 'daily'){ strat.type = 'weekly'; }
-      saveState(); render(); refreshHorizonLock(); renderFormulation();
-    });
-    tdOv.appendChild(ovSel); tr.appendChild(tdOv);
+    tdIdx.appendChild(idxSel);
 
     const tdType = document.createElement('td');
-    const typeSel = document.createElement('select'); typeSel.className = 'type-select';
-    const typeOptions = strat.overnight ? ['weekly','monthly'] : ['daily'];
-    typeOptions.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; if(strat.type===v)o.selected=true; typeSel.appendChild(o); });
-    if(!strat.overnight) typeSel.disabled = true;
-    typeSel.addEventListener('change', e=>{ strat.type = e.target.value; saveState(); refreshHorizonLock(); renderFormulation(); });
-    tdType.appendChild(typeSel); tr.appendChild(tdType);
+    const typeSel = document.createElement('select'); typeSel.className = 'type-select'; typeSel.dataset.field='type';
+    ['weekly','monthly'].forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; if(strat.type===v)o.selected=true; typeSel.appendChild(o); });
+    typeSel.addEventListener('change', e=>{ strat.type = e.target.value; saveState(); refreshHorizonLock(); renderTotals(); renderFormulation(); });
+    tdType.appendChild(typeSel);
 
     const tdCur = document.createElement('td');
-    const curInput = document.createElement('input'); curInput.className='units-cell'; curInput.style.width='90px'; curInput.type='number'; curInput.min='0'; curInput.step='1000'; curInput.placeholder='0';
-    curInput.value = strat.currentMargin || 0;
-    curInput.addEventListener('input', e=>{ strat.currentMargin = num(e.target.value); saveState(); renderTotals(); });
-    tdCur.appendChild(curInput); tr.appendChild(tdCur);
+    const curInput = document.createElement('input'); curInput.className='units-cell'; curInput.dataset.field='currentMargin'; curInput.style.width='90px'; curInput.type='number'; curInput.min='0'; curInput.step=moneyStep('1000'); curInput.placeholder='0';
+    curInput.value = toDisplay(strat.currentMargin);
+    curInput.addEventListener('input', e=>{ strat.currentMargin = fromDisplay(nonNegativeInput(e.target, 'Current margin')); saveState(); renderTotals(); });
+    tdCur.appendChild(curInput);
 
     const tdMinM = document.createElement('td');
-    const minMInput = document.createElement('input'); minMInput.className='units-cell'; minMInput.style.width='76px'; minMInput.type='number'; minMInput.min='0'; minMInput.step='1000'; minMInput.placeholder='none';
-    minMInput.value = strat.minMarginPerStrategy || '';
-    minMInput.addEventListener('input', e=>{ strat.minMarginPerStrategy = num(e.target.value); saveState(); renderFormulation(); });
-    tdMinM.appendChild(minMInput); tr.appendChild(tdMinM);
+    const minMInput = document.createElement('input'); minMInput.className='units-cell'; minMInput.dataset.field='minMarginPerStrategy'; minMInput.style.width='76px'; minMInput.type='number'; minMInput.min='0'; minMInput.step=moneyStep('1000'); minMInput.placeholder='none';
+    minMInput.value = strat.minMarginPerStrategy ? toDisplay(strat.minMarginPerStrategy) : '';
+    minMInput.addEventListener('input', e=>{ strat.minMarginPerStrategy = fromDisplay(nonNegativeInput(e.target, 'Min $/strat')); saveState(); renderFormulation(); });
+    tdMinM.appendChild(minMInput);
 
     const tdMaxM = document.createElement('td');
-    const maxMInput = document.createElement('input'); maxMInput.className='units-cell'; maxMInput.style.width='76px'; maxMInput.type='number'; maxMInput.min='0'; maxMInput.step='1000'; maxMInput.placeholder='none';
-    maxMInput.value = strat.maxMarginPerStrategy || '';
-    maxMInput.addEventListener('input', e=>{ strat.maxMarginPerStrategy = num(e.target.value); saveState(); renderFormulation(); });
-    tdMaxM.appendChild(maxMInput); tr.appendChild(tdMaxM);
+    const maxMInput = document.createElement('input'); maxMInput.className='units-cell'; maxMInput.dataset.field='maxMarginPerStrategy'; maxMInput.style.width='76px'; maxMInput.type='number'; maxMInput.min='0'; maxMInput.step=moneyStep('1000'); maxMInput.placeholder='none';
+    maxMInput.value = strat.maxMarginPerStrategy ? toDisplay(strat.maxMarginPerStrategy) : '';
+    maxMInput.addEventListener('input', e=>{ strat.maxMarginPerStrategy = fromDisplay(nonNegativeInput(e.target, 'Max $/strat')); saveState(); renderFormulation(); });
+    tdMaxM.appendChild(maxMInput);
 
     const tdLots = document.createElement('td'); tdLots.className='dtecol'; if(state.marginInputMode==='dte') tdLots.classList.add('show'); tdLots.style.textAlign='left';
-    const lotsInput = document.createElement('input'); lotsInput.className='cell'; lotsInput.style.width='90px'; lotsInput.type='text'; lotsInput.maxLength=5; lotsInput.placeholder='12111';
+    const lotsInput = document.createElement('input'); lotsInput.className='cell'; lotsInput.dataset.field='lotString'; lotsInput.style.width='90px'; lotsInput.type='text'; lotsInput.maxLength=5; lotsInput.placeholder='12111';
     lotsInput.value = strat.lotString || '';
     lotsInput.addEventListener('input', e=>{ strat.lotString = e.target.value.replace(/[^0-9]/g,'').slice(0,5); e.target.value = strat.lotString; saveState(); renderTotals(); renderFormulation(); });
-    tdLots.appendChild(lotsInput); tr.appendChild(tdLots);
+    tdLots.appendChild(lotsInput);
 
     const tdM0 = document.createElement('td'); tdM0.className='dtecol'; if(state.marginInputMode==='dte') tdM0.classList.add('show');
-    const m0Input = document.createElement('input'); m0Input.className='units-cell'; m0Input.style.width='76px'; m0Input.type='number'; m0Input.min='0'; m0Input.step='100';
-    m0Input.value = strat.margin0DTE || 0;
-    m0Input.addEventListener('input', e=>{ strat.margin0DTE = num(e.target.value); saveState(); renderTotals(); renderFormulation(); });
-    tdM0.appendChild(m0Input); tr.appendChild(tdM0);
+    const m0Input = document.createElement('input'); m0Input.className='units-cell'; m0Input.dataset.field='margin0DTE'; m0Input.style.width='76px'; m0Input.type='number'; m0Input.min='0'; m0Input.step=moneyStep('100');
+    m0Input.value = toDisplay(strat.margin0DTE);
+    m0Input.addEventListener('input', e=>{ strat.margin0DTE = fromDisplay(nonNegativeInput(e.target, 'Margin @0DTE')); saveState(); renderTotals(); renderFormulation(); });
+    tdM0.appendChild(m0Input);
 
     const tdIndep = document.createElement('td'); tdIndep.className='indepcol'; if(state.marginInputMode==='independent') tdIndep.classList.add('show'); tdIndep.style.textAlign='left';
-    const indepInput = document.createElement('input'); indepInput.className='cell margin-string'; indepInput.style.width='190px'; indepInput.type='text'; indepInput.placeholder='150000,300000,150000,150000,150000';
-    indepInput.value = strat.indepMargins ? WEEKDAYS.map(d=>strat.indepMargins[d]).join(',') : '0,0,0,0,0';
+    const indepInput = document.createElement('input'); indepInput.className='cell margin-string'; indepInput.dataset.field='indepMargins'; indepInput.style.width='190px'; indepInput.type='text'; indepInput.placeholder = displayUnit === 'millions' ? '0.15,0.3,0.15,0.15,0.15' : '150000,300000,150000,150000,150000';
+    indepInput.value = strat.indepMargins ? WEEKDAYS.map(d=>toDisplay(strat.indepMargins[d])).join(',') : '0,0,0,0,0';
     indepInput.addEventListener('input', e=>{
       const parts = e.target.value.split(',').map(s=>Number(String(s).trim())||0);
-      const obj = {}; WEEKDAYS.forEach((d,i)=>{ obj[d] = parts[i]||0; });
+      if(parts.some(v=>v<0)){
+        const fixed = parts.map(v=>Math.max(0,v));
+        e.target.value = fixed.join(',');
+        parts.splice(0, parts.length, ...fixed);
+        showToast('Margin by weekday cannot be negative — negative figures have been set to 0.', true);
+      }
+      const obj = {}; WEEKDAYS.forEach((d,i)=>{ obj[d] = fromDisplay(parts[i]||0); });
       strat.indepMargins = obj;
       saveState(); renderTotals(); renderFormulation();
     });
-    tdIndep.appendChild(indepInput); tr.appendChild(tdIndep);
+    tdIndep.appendChild(indepInput);
 
     const tdRet = document.createElement('td'); tdRet.className='riskcol'; if(state.objective==='riskadj') tdRet.classList.add('show');
-    const retInput = document.createElement('input'); retInput.className='units-cell'; retInput.style.width='72px'; retInput.type='number'; retInput.step='100';
-    retInput.value = strat.expectedReturn||0;
-    retInput.addEventListener('input', e=>{ strat.expectedReturn = num(e.target.value); saveState(); renderFormulation(); });
-    tdRet.appendChild(retInput); tr.appendChild(tdRet);
+    const retInput = document.createElement('input'); retInput.className='units-cell'; retInput.dataset.field='expectedReturn'; retInput.style.width='72px'; retInput.type='number'; retInput.step=moneyStep('100');
+    retInput.value = toDisplay(strat.expectedReturn);
+    retInput.addEventListener('input', e=>{ strat.expectedReturn = fromDisplay(e.target.value); saveState(); renderFormulation(); });
+    tdRet.appendChild(retInput);
 
     const tdRisk = document.createElement('td'); tdRisk.className='riskcol'; if(state.objective==='riskadj') tdRisk.classList.add('show');
-    const riskInput = document.createElement('input'); riskInput.className='units-cell'; riskInput.style.width='72px'; riskInput.type='number'; riskInput.step='100';
-    riskInput.value = strat.risk||0;
-    riskInput.addEventListener('input', e=>{ strat.risk = num(e.target.value); saveState(); renderFormulation(); });
-    tdRisk.appendChild(riskInput); tr.appendChild(tdRisk);
+    const riskInput = document.createElement('input'); riskInput.className='units-cell'; riskInput.dataset.field='risk'; riskInput.style.width='72px'; riskInput.type='number'; riskInput.step=moneyStep('100');
+    riskInput.value = toDisplay(strat.risk);
+    riskInput.addEventListener('input', e=>{ strat.risk = fromDisplay(e.target.value); saveState(); renderFormulation(); });
+    tdRisk.appendChild(riskInput);
 
     const tdRemove = document.createElement('td');
     const rm = document.createElement('button'); rm.className='remove-btn'; rm.textContent='✕';
     rm.addEventListener('click', ()=>{ state.strategies.splice(idx,1); saveState(); render(); refreshHorizonLock(); renderFormulation(); });
-    tdRemove.appendChild(rm); tr.appendChild(tdRemove);
+    tdRemove.appendChild(rm);
+
+    // Column order: strategy, index, type, margin @0DTE (or margin by weekday in
+    // Independent mode), min, max, lots, current margin, then return / risk.
+    [tdName, tdIdx, tdType, tdM0, tdIndep, tdMinM, tdMaxM, tdLots, tdCur, tdRet, tdRisk, tdRemove]
+      .forEach(td => tr.appendChild(td));
 
     fragment.appendChild(tr);
   });
@@ -768,8 +886,137 @@ function render(){
 }
 
 function renderTotals(){
-  const cap = num(document.getElementById('totalCapital').value) || 1;
+  const cap = num(document.getElementById('totalCapital').value);
   renderWeekTypeReport(cap);
+  renderSizing();
+}
+
+// ---------- LOTS & TRADE INTERVAL ----------
+// Reference per index + type: `lots` at `intervalSec` seconds gives `margin` at 0 DTE.
+// Margin scales with lots ÷ interval, so a strategy running at k × the reference
+// margin needs lots ÷ interval = k × (ref lots ÷ ref interval).
+const SIZING_KEYS = [['NF','weekly'],['NF','monthly'],['BN','weekly'],['BN','monthly'],['SN','weekly'],['SN','monthly']];
+function sizingKey(strat){ return strat.index + '|' + (strat.type === 'monthly' ? 'monthly' : 'weekly'); }
+
+// Reference edits don't change the solve, so keep the last result.
+function saveStateKeepSolve(){ const keep = lastOptimalScales; saveState(); lastOptimalScales = keep; }
+
+function renderSizing(){ renderSizingRef(); renderSizingOut(); }
+document.getElementById('sizingAddBtn').addEventListener('click', () => {
+  const key = document.getElementById('sizingAddSel').value;
+  if(!key || state.sizingRows.includes(key)) return;
+  state.sizingRows.push(key);
+  saveStateKeepSolve();
+  renderSizing();
+});
+
+function renderSizingRef(){
+  document.getElementById('sizingRefMarginLabel').textContent = '0DTE margin (' + unitSym() + ')';
+  const tbody = document.getElementById('sizingRefBody');
+  tbody.innerHTML = '';
+  const shown = SIZING_KEYS.filter(([idx, type]) => state.sizingRows.includes(idx + '|' + type));
+  shown.forEach(([idx, type]) => {
+    const key = idx + '|' + type;
+    const ref = state.sizingRef[key] || {};
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td'); tdName.style.textAlign = 'left'; tdName.textContent = idx + ' ' + type;
+    tr.appendChild(tdName);
+    [['lots','1',ref.lots],['intervalSec','any',ref.intervalSec],['margin','any',ref.margin]].forEach(([field, step, val]) => {
+      const td = document.createElement('td');
+      const inp = document.createElement('input');
+      inp.className = 'units-cell'; inp.style.width = '90px'; inp.type = 'number'; inp.min = '0'; inp.step = step;
+      inp.placeholder = '—'; inp.dataset.field = 'ref-' + (field === 'intervalSec' ? 'interval' : field); inp.dataset.key = key;
+      inp.value = val ? (field === 'margin' ? toDisplay(val) : val) : '';
+      inp.addEventListener('input', e => {
+        const label = { lots: 'Ref lots', intervalSec: 'Ref interval', margin: '0DTE margin' }[field];
+        let v = nonNegativeInput(e.target, label);
+        if(field === 'margin') v = fromDisplay(v);
+        state.sizingRef[key] = Object.assign({}, state.sizingRef[key], { [field]: v });
+        saveStateKeepSolve();
+        renderSizingOut();
+      });
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    const tdRm = document.createElement('td');
+    const rm = document.createElement('button'); rm.className = 'remove-btn'; rm.textContent = '✕';
+    rm.dataset.key = key; rm.title = 'Remove this reference row';
+    rm.addEventListener('click', () => {
+      state.sizingRows = state.sizingRows.filter(k => k !== key);
+      delete state.sizingRef[key]; // removing a row clears its values
+      saveStateKeepSolve();
+      renderSizing();
+    });
+    tdRm.appendChild(rm); tr.appendChild(tdRm);
+    tbody.appendChild(tr);
+  });
+
+  // Removed rows can be added back from the picker under the table.
+  const hidden = SIZING_KEYS.filter(([idx, type]) => !state.sizingRows.includes(idx + '|' + type));
+  const sel = document.getElementById('sizingAddSel');
+  sel.innerHTML = hidden.map(([idx, type]) => `<option value="${idx}|${type}">${idx} ${type}</option>`).join('');
+  document.getElementById('sizingAddWrap').style.display = hidden.length ? 'flex' : 'none';
+}
+
+// One strategy's sizing from the last solve. Returns { k, lots, interval } or { note }.
+function sizingFor(strat, i){
+  const x = lastOptimalScales ? (lastOptimalScales[i] || 0) : 0;
+  if(x <= 0) return { note: 'not run' };
+  const ref = state.sizingRef[sizingKey(strat)] || {};
+  const refName = sizingKey(strat).replace('|',' ');
+  if(!state.sizingRows.includes(sizingKey(strat))) return { note: 'add a ' + refName + ' reference row above' };
+  if(!(ref.lots > 0) || !(ref.intervalSec > 0) || !(ref.margin > 0)) return { note: 'set the ' + refName + ' reference above' };
+  if(!(num(strat.margin0DTE) > 0)) return { note: 'no margin @0DTE' };
+  // Both margins compared at 0 DTE; the DTE curve affects them equally, so it cancels.
+  const k = x * num(strat.margin0DTE) / ref.margin;
+  const lots = strat.sizingLots > 0 ? strat.sizingLots : ref.lots;
+  return { k, lots, interval: ref.intervalSec * (lots / ref.lots) / k }; // seconds
+}
+
+function renderSizingOut(){
+  const emptyMsg = document.getElementById('sizingEmptyMsg');
+  const wrap = document.getElementById('sizingOutWrap');
+  let why = '';
+  if(!state.strategies.length) why = 'No strategies yet — add some on the table above.';
+  else if(state.marginInputMode === 'independent') why = 'Lots & trade interval needs margin @0DTE — switch the strategies table to "Derive from DTE curve".';
+  else if(!lastOptimalScales) why = 'Run "Solve MILP" above first.';
+  emptyMsg.style.display = why ? 'block' : 'none';
+  emptyMsg.textContent = why;
+  wrap.style.display = why ? 'none' : 'block';
+  if(why) return;
+
+  const tbody = document.getElementById('sizingOutBody');
+  tbody.innerHTML = '';
+  state.strategies.forEach((strat, i) => {
+    const res = sizingFor(strat, i);
+    const peak = (lastOptimalScales[i] || 0) * peakUnitMargin(strat);
+    const tr = document.createElement('tr');
+    const cell = (text, left) => { const td = document.createElement('td'); if(left) td.style.textAlign = 'left'; td.textContent = text; tr.appendChild(td); return td; };
+    cell(strat.name, true);
+    cell(sizingKey(strat).replace('|',' '), true);
+    cell(fmt(peak));
+    cell(res.note ? '—' : res.k.toFixed(2) + '×');
+    const tdLots = document.createElement('td');
+    const tdInt = document.createElement('td');
+    const showInterval = r => { tdInt.textContent = r.note ? r.note : r.interval.toFixed(1) + ' s'; };
+    if(res.note){
+      tdLots.textContent = '—';
+    }else{
+      const inp = document.createElement('input');
+      inp.className = 'units-cell'; inp.style.width = '64px'; inp.type = 'number'; inp.min = '0'; inp.step = '1';
+      inp.dataset.field = 'sizing-lots'; inp.value = res.lots;
+      inp.addEventListener('input', e => {
+        strat.sizingLots = nonNegativeInput(e.target, 'Lots'); // blank / 0 = use the reference lots
+        saveStateKeepSolve();
+        showInterval(sizingFor(strat, i)); // update in place so the lots box keeps focus
+      });
+      inp.addEventListener('change', e => { if(!(strat.sizingLots > 0)) e.target.value = sizingFor(strat, i).lots; });
+      tdLots.appendChild(inp);
+    }
+    tr.appendChild(tdLots);
+    showInterval(res);
+    tr.appendChild(tdInt);
+    tbody.appendChild(tr);
+  });
 }
 
 // scale factor to use for a strategy at row-index i, under the current report mode
@@ -813,14 +1060,16 @@ function renderWeekTypeReport(cap){
   emptyMsg.style.display = 'none';
   tableWrap.style.display = 'block';
 
-  function marginRow(label, values, bold){
+  // opts.expiryCol: column to colour as the expiry day; opts.tone: its colour class
+  function marginRow(label, values, bold, opts){
+    opts = opts || {};
     return `<tr${bold?' class="total-row"':''}><td style="text-align:left;">${label}</td>`+
-      values.map(v=>`<td>${fmtNum(v)}</td>`).join('')+`</tr>`;
+      values.map((v,di)=>`<td${di === opts.expiryCol ? ' class="expiry-cell '+opts.tone+'" title="expiry day"' : ''}>${fmtNum(v)}</td>`).join('')+`</tr>`;
   }
   function utilRowHtml(label, values){
     return `<tr class="util-row"><td style="text-align:left;">${label}</td>`+
       values.map(v=>{
-        const util = v/cap;
+        const util = cap > 0 ? v/cap : 0;
         return `<td><div class="util-cell"><div class="util-num">${(util*100).toFixed(1)}%</div><div class="util-bar-track"><div class="util-bar-fill" style="width:${Math.min(util*100,100)}%;background:var(--accent-2)"></div></div></div></td>`;
       }).join('')+`</tr>`;
   }
@@ -836,7 +1085,7 @@ function renderWeekTypeReport(cap){
         totals[di]+=v;
         return v;
       });
-      html += marginRow(strat.name, values);
+      html += marginRow(strat.name, values, false, { tone: toneClass(strat), expiryCol: expiryColFor(strat, 1) });
     });
     html += marginRow('TOTAL', totals, true);
     html += utilRowHtml('UTILIZATION', totals);
@@ -852,7 +1101,7 @@ function renderWeekTypeReport(cap){
         totals[di]+=v;
         return v;
       });
-      html += marginRow(strat.name, values);
+      html += marginRow(strat.name, values, false, { tone: toneClass(strat), expiryCol: expiryColFor(strat, weekNum) });
     });
     html += marginRow('TOTAL', totals, true);
     html += utilRowHtml('UTILIZATION', totals);
@@ -879,18 +1128,18 @@ document.getElementById('reportMode').addEventListener('change', ()=>{
 });
 
 document.getElementById('addRow').addEventListener('click', ()=>{
-  state.strategies.push({name:'NEW_STRAT', index:'NF', overnight:true, type:'weekly', currentMargin:0, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:0, indepMargins:{mon:0,tue:0,wed:0,thu:0,fri:0}, expectedReturn:0, risk:0});
+  state.strategies.push({name:'NEW_STRAT', index:'NF', type:'weekly', currentMargin:0, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:0, indepMargins:{mon:0,tue:0,wed:0,thu:0,fri:0}, expectedReturn:0, risk:0});
   saveState(); render(); renderFormulation();
 });
 
 document.getElementById('loadSample').addEventListener('click', ()=>{
   const sample = [
-    {name:'NF_DAILY',    index:'NF', overnight:false, type:'daily',   currentMargin:1200000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:600000, indepMargins:{mon:850000,tue:1200000,wed:1340000,thu:1200000,fri:1040000}, expectedReturn:40000, risk:20000},
-    {name:'NF_MONTHLY',  index:'NF', overnight:true,  type:'monthly', currentMargin:800000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:400000, indepMargins:{mon:566000,tue:400000,wed:894000,thu:800000,fri:693000}, expectedReturn:70000, risk:45000},
-    {name:'BN_DAILY',    index:'BN', overnight:false, type:'daily',   currentMargin:1000000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'12111', margin0DTE:500000, indepMargins:{mon:707000,tue:1000000,wed:1118000,thu:1000000,fri:866000}, expectedReturn:30000, risk:15000},
-    {name:'BN_MONTHLY',  index:'BN', overnight:true,  type:'monthly', currentMargin:700000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:350000, indepMargins:{mon:495000,tue:350000,wed:783000,thu:700000,fri:606000}, expectedReturn:55000, risk:35000},
-    {name:'SN_DAILY',    index:'SN', overnight:false, type:'daily',   currentMargin:1050000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'10203', margin0DTE:550000, indepMargins:{mon:1100000,tue:0,wed:1556000,thu:0,fri:3690000}, expectedReturn:35000, risk:18000},
-    {name:'SN_MONTHLY',  index:'SN', overnight:true,  type:'monthly', currentMargin:750000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:380000, indepMargins:{mon:760000,tue:658000,wed:537000,thu:380000,fri:850000}, expectedReturn:60000, risk:38000}
+    {name:'NF_WEEKLY',   index:'NF', type:'weekly',  currentMargin:1200000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:600000, indepMargins:{mon:850000,tue:1200000,wed:1340000,thu:1200000,fri:1040000}, expectedReturn:40000, risk:20000},
+    {name:'NF_MONTHLY',  index:'NF', type:'monthly', currentMargin:800000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:400000, indepMargins:{mon:566000,tue:400000,wed:894000,thu:800000,fri:693000}, expectedReturn:70000, risk:45000},
+    {name:'BN_WEEKLY',   index:'BN', type:'weekly',  currentMargin:1000000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'12111', margin0DTE:500000, indepMargins:{mon:707000,tue:2000000,wed:1118000,thu:1000000,fri:866000}, expectedReturn:30000, risk:15000},
+    {name:'BN_MONTHLY',  index:'BN', type:'monthly', currentMargin:700000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:350000, indepMargins:{mon:495000,tue:350000,wed:783000,thu:700000,fri:606000}, expectedReturn:55000, risk:35000},
+    {name:'SN_WEEKLY',   index:'SN', type:'weekly',  currentMargin:1050000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'10203', margin0DTE:550000, indepMargins:{mon:1100000,tue:0,wed:1556000,thu:0,fri:3690000}, expectedReturn:35000, risk:18000},
+    {name:'SN_MONTHLY',  index:'SN', type:'monthly', currentMargin:750000, minMarginPerStrategy:0, maxMarginPerStrategy:0, lotString:'11111', margin0DTE:380000, indepMargins:{mon:760000,tue:658000,wed:537000,thu:380000,fri:850000}, expectedReturn:60000, risk:38000}
   ];
   state.strategies = state.strategies.concat(sample);
   saveState();
@@ -901,13 +1150,14 @@ document.getElementById('loadSample').addEventListener('click', ()=>{
 
 document.getElementById('downloadSample').addEventListener('click', ()=>{
   try{
+    // Column order matches the strategies table.
     const rows = [
-      {strategy:'NF_DAILY',   index:'NF', overnight:'no',  type:'daily',   current_margin:1200000, min_margin:0, max_margin:0, lots:'11111', margin_0dte:600000, expected_return:40000, risk:20000},
-      {strategy:'NF_MONTHLY', index:'NF', overnight:'yes', type:'monthly', current_margin:800000, min_margin:0, max_margin:0, lots:'11111', margin_0dte:400000, expected_return:70000, risk:45000},
-      {strategy:'BN_DAILY',   index:'BN', overnight:'no',  type:'daily',   current_margin:1000000, min_margin:0, max_margin:0, lots:'12111', margin_0dte:500000, expected_return:30000, risk:15000},
-      {strategy:'BN_MONTHLY', index:'BN', overnight:'yes', type:'monthly', current_margin:700000, min_margin:0, max_margin:0, lots:'11111', margin_0dte:350000, expected_return:55000, risk:35000},
-      {strategy:'SN_DAILY',   index:'SN', overnight:'no',  type:'daily',   current_margin:1050000, min_margin:0, max_margin:0, lots:'10203', margin_0dte:550000, expected_return:35000, risk:18000},
-      {strategy:'SN_MONTHLY', index:'SN', overnight:'yes', type:'monthly', current_margin:750000, min_margin:0, max_margin:0, lots:'11111', margin_0dte:380000, expected_return:60000, risk:38000}
+      {strategy:'NF_WEEKLY',  index:'NF', type:'weekly',  margin_0dte:600000, min_margin:0, max_margin:0, lots:'11111', current_margin:1200000, expected_return:40000, risk:20000},
+      {strategy:'NF_MONTHLY', index:'NF', type:'monthly', margin_0dte:400000, min_margin:0, max_margin:0, lots:'11111', current_margin:800000,  expected_return:70000, risk:45000},
+      {strategy:'BN_WEEKLY',  index:'BN', type:'weekly',  margin_0dte:500000, min_margin:0, max_margin:0, lots:'12111', current_margin:1000000, expected_return:30000, risk:15000},
+      {strategy:'BN_MONTHLY', index:'BN', type:'monthly', margin_0dte:350000, min_margin:0, max_margin:0, lots:'11111', current_margin:700000,  expected_return:55000, risk:35000},
+      {strategy:'SN_WEEKLY',  index:'SN', type:'weekly',  margin_0dte:550000, min_margin:0, max_margin:0, lots:'10203', current_margin:1050000, expected_return:35000, risk:18000},
+      {strategy:'SN_MONTHLY', index:'SN', type:'monthly', margin_0dte:380000, min_margin:0, max_margin:0, lots:'11111', current_margin:750000,  expected_return:60000, risk:38000}
     ];
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -975,7 +1225,6 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
 
       const nameCol = findCol('strategy','name');
       const idxCol = findCol('index');
-      const ovCol = findCol('overnight');
       const typeCol = findCol('type');
       const curCol = findCol('currentmargin','currentunits','curmargin');
       const maxMCol = findCol('maxmargin','maxmarginperstrategy');
@@ -987,15 +1236,13 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
       const indepCols = {mon:findCol('marginmon','mon'), tue:findCol('margintue','tue'), wed:findCol('marginwed','wed'), thu:findCol('marginthu','thu'), fri:findCol('marginfri','fri')};
 
       const parsed = rows.map(r=>{
-        const overnight = ovCol ? /^(y|yes|true|1)$/i.test(String(r[ovCol]).trim()) : true;
-        let type = typeCol ? String(r[typeCol]).toLowerCase() : 'weekly';
-        if(!overnight) type = 'daily';
-        else if(type==='daily') type = 'weekly';
+        // weekly or monthly only; an old 'daily' type or an 'overnight' column is read as weekly
+        const type = typeCol && String(r[typeCol]).trim().toLowerCase() === 'monthly' ? 'monthly' : 'weekly';
         const hasIndep = Object.values(indepCols).some(c=>c!==null);
         return {
           name: nameCol ? String(r[nameCol]) : 'STRAT',
           index: idxCol ? String(r[idxCol]).toUpperCase() : 'NF',
-          overnight, type,
+          type,
           currentMargin: curCol ? num(r[curCol]) : 0,
           maxMarginPerStrategy: maxMCol ? num(r[maxMCol]) : 0,
           minMarginPerStrategy: minMCol ? num(r[minMCol]) : 0,
@@ -1012,6 +1259,18 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
           } : {mon:0,tue:0,wed:0,thu:0,fri:0}
         };
       }).filter(s => ['NF','BN','SN'].includes(s.index));
+
+      // Margin can never be negative: clamp any negative margin column to 0 and say so.
+      let negCount = 0;
+      const clamp = v => { if(v < 0){ negCount++; return 0; } return v; };
+      parsed.forEach(s => {
+        s.currentMargin = clamp(s.currentMargin);
+        s.minMarginPerStrategy = clamp(s.minMarginPerStrategy);
+        s.maxMarginPerStrategy = clamp(s.maxMarginPerStrategy);
+        s.margin0DTE = clamp(s.margin0DTE);
+        WEEKDAYS.forEach(d => { s.indepMargins[d] = clamp(s.indepMargins[d]); });
+      });
+      if(negCount) showToast(negCount + ' negative margin value' + (negCount>1?'s':'') + ' in the file ' + (negCount>1?'were':'was') + ' set to 0 — margin cannot be negative.', true);
 
       if(!parsed.length){ showToast('Could not find valid rows — check the index column has NF/BN/SN.', true); return; }
       state.strategies = state.strategies.concat(parsed);
@@ -1081,7 +1340,7 @@ document.getElementById('unitToggle').addEventListener('click', ()=>{
   displayUnit = displayUnit === 'raw' ? 'millions' : 'raw';
   document.getElementById('unitToggle').textContent = displayUnit === 'millions' ? 'units: $M' : 'units: $';
   try{ localStorage.setItem('marginDeskUnit', displayUnit); }catch(e){}
-  renderTotals();
+  render(); // strategies table inputs + headers, and the report
   renderFormulation();
   renderSolverOutputTables();
   renderHeuristic();
@@ -1188,7 +1447,7 @@ function renderFormulation(){
 
 // ---------- SOLVE ----------
 function buildAndSolve(){
-  const cap = num(document.getElementById('totalCapital').value) || 1;
+  const cap = num(document.getElementById('totalCapital').value);
   const minTotal = num(document.getElementById('minTotalMargin').value);
   const slots = getSlots();
   const capByIndex = {NF:num(document.getElementById('capNF').value), BN:num(document.getElementById('capBN').value), SN:num(document.getElementById('capSN').value)};
@@ -1210,16 +1469,23 @@ function buildAndSolve(){
     let totalUtilCoeff = 0;
     slots.forEach(slot=>{
       const m = unitMargin(s, slot);
-      coeffs['slot_'+slot] = m;
+      // Omit rather than write an explicit 0 coefficient. Mathematically a
+      // missing entry and an explicit 0 are identical — the variable just
+      // doesn't appear in that constraint's sum — but javascript-lp-solver@1.0.3
+      // mis-reports a model as infeasible when a single-variable book has an
+      // explicit 0 on a max-type constraint (e.g. a strategy that holds no
+      // lots on one weekday). Skipping the zero avoids the bug without
+      // changing what the model means.
+      if(m !== 0) coeffs['slot_'+slot] = m;
       totalUtilCoeff += m;
-      if(state.objective === 'maximin') coeffs['z_'+slot] = m;
+      if(state.objective === 'maximin' && m !== 0) coeffs['z_'+slot] = m;
 
       // per-strategy floor/ceiling — the floor only applies on days the strategy
       // actually has margin (m > 0), so it doesn't force a position on days its
       // own lot pattern has zero lots
       if(s.maxMarginPerStrategy>0 || (s.minMarginPerStrategy>0 && m>0)){
         const cname = 'stratcap_'+i+'_'+slot;
-        coeffs[cname] = m;
+        if(m !== 0) coeffs[cname] = m;
         const bound = {};
         if(s.maxMarginPerStrategy>0) bound.max = s.maxMarginPerStrategy;
         if(s.minMarginPerStrategy>0 && m>0) bound.min = s.minMarginPerStrategy;
@@ -1228,7 +1494,7 @@ function buildAndSolve(){
 
       if(capByIndex[s.index] > 0 || minByIndex[s.index] > 0){
         const cname = 'idxcap_'+s.index+'_'+slot;
-        coeffs[cname] = m;
+        if(m !== 0) coeffs[cname] = m;
         if(!constraints[cname]){
           const bound = {};
           if(capByIndex[s.index] > 0) bound.max = capByIndex[s.index];
@@ -1259,6 +1525,13 @@ function buildAndSolve(){
 document.getElementById('solveBtn').addEventListener('click', ()=>{
   const badge = document.getElementById('statusBadge');
   if(state.strategies.length === 0){ badge.textContent='no strategies'; badge.className='status-badge bad'; return; }
+  if(!(num(document.getElementById('totalCapital').value) > 0)){
+    badge.textContent = 'invalid capital'; badge.className = 'status-badge bad';
+    document.getElementById('solverEmpty').style.display = 'block';
+    document.getElementById('solverEmpty').textContent = 'Total margin capital must be greater than $0 — enter the capital you have available to deploy.';
+    document.getElementById('solverOutput').style.display = 'none';
+    return;
+  }
   let solved;
   try{ solved = buildAndSolve(); }
   catch(e){ badge.textContent='solver error'; badge.className='status-badge bad'; console.error(e); return; }
@@ -1286,6 +1559,7 @@ document.getElementById('solveBtn').addEventListener('click', ()=>{
   lastOptimalScales = state.strategies.map((s,i)=> result['x'+i] || 0);
   lastSolveMs = solveMs;
   lastObjType = state.objective === 'maximin' ? 'percent' : 'dollar';
+  lastObjective = state.objective; lastSlotCount = getSlots().length;
   lastObjRaw = state.objective === 'maximin' ? (result.z!==undefined ? result.z : null) : result.result;
 
   renderTotals();
@@ -1296,9 +1570,15 @@ document.getElementById('solveBtn').addEventListener('click', ()=>{
 // so it can be called again (e.g. after a unit toggle) without needing to re-solve.
 function renderSolverOutputTables(){
   if(!lastOptimalScales) return;
-  const cap = num(document.getElementById('totalCapital').value) || 1;
+  const cap = num(document.getElementById('totalCapital').value);
   const slots = getSlots();
 
+  const days = lastSlotCount === 20 ? '20 days' : '5 days';
+  document.getElementById('objValueTip').dataset.tip = ({
+    total: 'Margin used each day, added up over all ' + days + '. Dollars × days, not a balance.',
+    maximin: 'Share of capital used on your least-used day.',
+    riskadj: 'Total score: (return − λ × risk) × size, summed over strategies.'
+  })[lastObjective] || document.getElementById('objValueTip').dataset.tip;
   document.getElementById('objValue').textContent =
     lastObjRaw===null ? '—' : (lastObjType==='percent' ? (lastObjRaw*100).toFixed(1)+'%' : fmt(lastObjRaw));
   document.getElementById('solveTime').textContent = lastSolveMs===null ? '—' : lastSolveMs.toFixed(1)+' ms';
@@ -1310,8 +1590,8 @@ function renderSolverOutputTables(){
       optTotal += unitMargin(s, sl) * (lastOptimalScales[i] || 0);
       curTotal += unitMargin(s, sl) * currentScale(s);
     });
-    sumOpt += optTotal/cap;
-    sumCur += curTotal/cap;
+    sumOpt += cap > 0 ? optTotal/cap : 0;
+    sumCur += cap > 0 ? curTotal/cap : 0;
   });
 
   const avgOpt = (sumOpt/slots.length)*100, avgCur=(sumCur/slots.length)*100, diff=avgOpt-avgCur;
@@ -1323,8 +1603,7 @@ function renderSolverOutputTables(){
 function renderHeuristic(){
   const m0 = num(document.getElementById('m0dte').value);
   const dte = num(document.getElementById('targetDte').value);
-  const c = num(document.getElementById('offsetC').value)||1;
-  const exp = num(document.getElementById('exponent').value)||0.5;
+  const { c, exp } = globalCurve(); // same parse as the solver, so the preview can't drift from it
   const ratio = Math.pow((dte+c)/c, exp);
   document.getElementById('heurResult').textContent = fmt(m0*ratio);
   document.getElementById('heurRatio').textContent = 'ratio to 0DTE: ×'+ratio.toFixed(2);

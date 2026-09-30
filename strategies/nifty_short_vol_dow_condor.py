@@ -30,8 +30,8 @@ class Nifty(DowCondor):
     # Tuesday is affected here — its midpoints are -77.5 and -112.5, which the
     # integer rule was rounding, and inconsistently, to -78 and -112.
     gamma_threshold_ranges = {
-        0: (-40.0, -80.0, 5), 1: (-60.0, -130.0, 5), 2: (-10.0, -50.0, 5),
-        3: (-20.0, -60.0, 5), 4: (-20.0, -60.0, 5),
+        0: (40.0, 80.0, 5), 1: (60.0, 130.0, 5), 2: (10.0, 50.0, 5),
+        3: (20.0, 60.0, 5), 4: (20.0, 60.0, 5),
     }
     hedge_constant_ranges = {
         "gamma":    {0: (100_000, 10_000_000, 10), 1: (200_000, 20_000_000, 10),

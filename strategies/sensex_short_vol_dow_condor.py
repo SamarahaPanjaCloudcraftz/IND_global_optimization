@@ -31,8 +31,8 @@ class Sensex(DowCondor):
     # but not for a threshold. Written as ints, -1 to -4 over five steps
     # collapses onto four distinct values.
     gamma_threshold_ranges = {
-        0: (-1.0, -4.0, 5), 1: (-2.0, -5.0, 5), 2: (-3.0, -6.0, 5),
-        3: (-4.5, -8.5, 5), 4: (-0.5, -2.5, 5),
+        0: (1.0, 4.0, 5), 1: (2.0, 5.0, 5), 2: (3.0, 6.0, 5),
+        3: (4.5, 8.5, 5), 4: (0.5, 2.5, 5),
     }
     hedge_constant_ranges = {
         "gamma":    {0: (200_000, 20_000_000, 10), 1: (200_000, 20_000_000, 10),

@@ -132,11 +132,10 @@ class DowCondor:
             # The baseline keeps it False, so the control stays unhedged.
             Leaf("gamma_hedge", [True], domain=[True]),
             Leaf("gamma_threshold", [self.gamma_threshold]),
-            # The same config key the delta hedge uses. One constant sizes both
-            # components — gamma_hedge_component multiplies its hedge ratio by
-            # it unconditionally, while the delta side only consults it when
-            # custom_pct_to_hedge is on.
-            Leaf("percent_hedge", list(self.hedge_pct)),
+            # The gamma hedge's own fraction: gamma_hedge_component multiplies
+            # its hedge ratio by it. Separate from the delta side's
+            # percent_hedge, so the two hedges can be sized independently.
+            Leaf("gamma_pct_hedge", list(self.hedge_pct)),
             # Delta x 100, not a strike distance. See Backtest_engine_constraints.md
             Leaf("gamma_hege_otm_outstrike", [50]),
             Leaf("gamma_hedge_trade_direction", ["both"],
@@ -293,9 +292,7 @@ class DowCondor:
         """Sweep ranges keyed by leaf path, prefix, or bare parameter name."""
         found = {
             "percent_hedge": self.percent_hedge_range,
-            # Same parameter, its own range on the gamma axis. The exact path
-            # wins over the bare name, so the delta side keeps its own.
-            "gamma_hedging/percent_hedge": self.gamma_percent_hedge_range,
+            "gamma_pct_hedge": self.gamma_percent_hedge_range,
             "unwind_time": self.unwind_time_range,
             "day_of_week_entry_start_time": self.entry_start_range,
             "day_of_week_entry_end_time": self.entry_end_range,
@@ -349,6 +346,7 @@ class DowCondor:
             "underlying_threshold_hedge_type": self.baseline_hedge_mode,
             "underlying_threshold_hedge_constant": dict(self.hedge_constant),
             "percent_hedge": self.hedge_pct[0],
+            "gamma_pct_hedge": self.hedge_pct[0],
             "dow_strangle_leg": dict(self.strangle_base),
             "dow_wing_leg": dict(self.wing_base),
             "OTM_outstrike": self.otm_outstrike,
@@ -393,7 +391,7 @@ class DowCondor:
         return {
             # One setting each, applied to every branch of the axis.
             # Not weekday-keyed in the engine, so one setting covers the axis.
-            "gamma_hedging": ["percent_hedge", "gamma_hege_otm_outstrike",
+            "gamma_hedging": ["gamma_pct_hedge", "gamma_hege_otm_outstrike",
                               "gamma_hedge_trade_direction"],
             "delta_hedging": ["custom_pct_to_hedge", "percent_hedge"],
             # One unwind setting each, applied to every selling weekday.

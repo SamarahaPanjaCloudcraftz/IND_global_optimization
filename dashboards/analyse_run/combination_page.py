@@ -8,6 +8,7 @@ is reused rather than run again. A section only appears once every result it
 compares exists, so no best-of is ever read off a half-finished round.
 """
 
+import re
 from collections.abc import Callable
 from datetime import time
 from pathlib import Path
@@ -18,6 +19,7 @@ import streamlit as st
 import combine as C
 import margin
 import ranking
+import series
 from summary import FORMATS, METRICS, _against
 
 WEEKDAY_KEYS = {0, 1, 2, 3, 4}
@@ -181,7 +183,7 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
                    "hedge H, the combined sell S, F (best hedge + best sell) and the baseline.")
         final_by = st.segmented_control("Best by", ranking.TOP_BY, default="Composite",
                                         key=f"{scope}:combine:final:by") or "Composite"
-        rows, full = [], {}
+        rows, full, picks = [], {}, {}
         for weekday, p in plan.items():
             named = {**{FINAL_NAMES[r]: p["axis"][r] for r in C.HEDGE_AXES + C.SELL_AXES},
                      "combined hedge (H)": p["H"], "combined sell (S)": p["S"],
@@ -191,7 +193,39 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
             chosen = next(c for c in pool if c.name == top["Variant"])
             rows.append(row_of(weekday, chosen, top, base_row))
             full[weekday] = table
+            picks[weekday] = chosen
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        if picks:
+            risk_by = st.segmented_control("Risk column", list(RISK_MEASURES), default=RISK_DEFAULT,
+                                           key=f"{scope}:combine:csv-risk") or RISK_DEFAULT
+            # The same margin normalisation as the table: each variant put on its
+            # weekday baseline's margin, so the CSV carries the numbers shown above.
+            factors = {}
+            for w, c in picks.items():
+                own = margin.margin_factor(C.as_json(c.config))
+                factors[w] = margin.margin_factor(C.as_json(plan[w]["base"])) / own if own else 0
+            sheet = _margin_desk_sheet(picks, {w: equity_of(result(c)) for w, c in picks.items()},
+                                       risk_by, factors)
+            underlying = next(iter(picks.values())).config.get("underlying", "strategy")
+            folder = stage_dir / C.COMBINATIONS / MARGIN_CSVS
+            default = (f"margin_desk_{underlying}_{re.sub(r'[^0-9A-Za-z]+', '_', final_by.replace('&', '')).strip('_')}"
+                       f"_{RISK_MEASURES[risk_by]}")
+            with st.container(horizontal=True, vertical_alignment="bottom"):
+                name = st.text_input("CSV name", value=default,
+                                     key=f"{scope}:combine:csv-name:{final_by}:{risk_by}")
+                save = st.button("Save CSV", key=f"{scope}:combine:csv-save", icon=":material/save:")
+            if save:
+                _save_margin_csv(sheet, folder, name)
+            st.caption(f"Saves the margin desk strategies to {folder}. "
+                       "One weekly strategy per weekday, in the margin desk's upload format. "
+                       "lots marks the days each position is held; margin_0dte scales the "
+                       "reference 0 DTE margin (NIFTY: 260 units every 5 min = $6M; SENSEX: 40 "
+                       "units every 3 min = $5M) by the run's units ÷ trade interval; "
+                       "expected_return is its total P&L in the selected date range, and risk "
+                       "the size of its max drawdown or the standard deviation of its daily "
+                       "P&L on the days it has P&L in that range, as chosen above — all on the "
+                       "baseline's margin, exactly as in the table. current_margin and the "
+                       "min / max margins are left at 0, to be filled in on the desk.")
         with st.expander("All nine candidates, per weekday"):
             ranks = {c: "{:g}" for c in next(iter(full.values())).columns
                      if c.endswith("rank") or c == "Composite"} if full else {}
@@ -204,6 +238,99 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
 FINAL_NAMES = {"delta_hedging": "best delta hedge", "gamma_hedging": "best gamma hedge",
                "condor_OTM_outstrike": "best condor", "dow_signal_strength": "best unwind",
                "trade_time": "best entry time"}
+
+MARGIN_CSVS = "margin_csvs"
+# Risk column choices for the margin desk CSV -> the suffix naming the file.
+RISK_MEASURES = {"Max drawdown": "maxdd", "Daily P&L std": "dailystd"}
+RISK_DEFAULT = "Max drawdown"
+
+
+def _save_margin_csv(sheet: pd.DataFrame, folder: Path, name: str) -> None:
+    """Write the sheet as <folder>/<name>.csv, never replacing an existing file."""
+    stem = name.strip()
+    if stem.lower().endswith(".csv"):
+        stem = stem[:-4].strip()
+    if not stem or any(ch in stem for ch in "/\\") or stem.startswith("."):
+        st.error("Enter a file name without slashes, e.g. margin_desk_NIFTY_Composite.",
+                 icon=":material/error:")
+        return
+    path = folder / f"{stem}.csv"
+    if path.exists():
+        st.error(f"{path.name} already exists in {folder} — choose another name.",
+                 icon=":material/error:")
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    sheet.to_csv(path, index=False)
+    st.success(f"Saved {path}", icon=":material/check_circle:")
+
+
+# The margin desk's index codes, and the columns of its upload file, in its order.
+DESK_INDEX = {"NIFTY": "NF", "BANKNIFTY": "BN", "SENSEX": "SN"}
+# 0 DTE margin at a reference size, per index: (unit_size, trade interval in
+# minutes, margin in $). Margin scales with units ÷ interval, as on the desk.
+DESK_REF_MARGIN = {"NF": (260, 5, 6_000_000), "SN": (40, 3, 5_000_000)}
+
+
+def _margin_0dte(config: dict, index: str) -> float:
+    """0 DTE margin for a run's unit size and trade interval, from the reference."""
+    if index not in DESK_REF_MARGIN:
+        return 0
+    units, minutes, dollars = DESK_REF_MARGIN[index]
+    return round(dollars * (config["unit_size"] / units) * (minutes / config["trade_interval_time"]), 2)
+DESK_COLUMNS = ["strategy", "index", "type", "margin_0dte", "min_margin", "max_margin",
+                "lots", "current_margin", "expected_return", "risk"]
+
+
+def _held_days(config: dict, day: int) -> str:
+    """Mon..Fri pattern of the days a book sold on `day` is open: from the sale to
+    its unwind, unwind_trading_days_before trading days ahead of expiry, on the
+    nominal weekly cycle."""
+    to_expiry = (config["expiry_day_of_week"] - day) % 5
+    held = {(day + k) % 5 for k in range(to_expiry - config["unwind_trading_days_before"] + 1)}
+    return "".join("1" if d in held else "0" for d in range(5))
+
+
+def _risk(equity: pd.DataFrame, measure: str) -> float:
+    """The risk figure for the desk, as a positive amount."""
+    if equity.empty:
+        return 0
+    if measure == "Max drawdown":
+        return round(float(-series.drawdown(equity)["drawdown"].min()), 2)
+    # Days with no P&L are days the book is not open; counting them would
+    # understate the spread of a variant that holds briefly.
+    daily = series.pnl(equity, "Daily")["pnl"]
+    daily = daily[daily != 0]
+    return round(float(daily.std()), 2) if len(daily) > 1 else 0
+
+
+def _margin_desk_sheet(picks: dict, equity: dict, risk_by: str = RISK_DEFAULT,
+                       factors: dict | None = None) -> pd.DataFrame:
+    """One margin-desk strategy row per weekday's recommended variant.
+
+    expected_return is the total P&L of the range; risk is chosen by `risk_by`.
+    Both are multiplied by the weekday's margin factor (baseline margin ÷ the
+    variant's), which scales a P&L series and so its drawdown and its standard
+    deviation alike.
+    The lot pattern is written with a leading apostrophe: the desk reads files
+    through SheetJS, which would otherwise turn "00110" into the number 110 and
+    shift the days, and the desk strips non-digits from the column anyway.
+    """
+    rows = []
+    for weekday, chosen in picks.items():
+        day = WEEKDAYS.index(weekday)
+        index = DESK_INDEX.get(str(chosen.config.get("underlying", "")).upper(), "NF")
+        scale = (factors or {}).get(weekday, 1.0)
+        curve = equity[weekday].assign(equity=equity[weekday]["equity"] * scale)
+        rows.append({
+            "strategy": f"{str(chosen.config.get('underlying', index)).upper()}_{weekday[:3].upper()}",
+            "index": index, "type": "weekly",
+            "margin_0dte": _margin_0dte(chosen.config, index), "min_margin": 0, "max_margin": 0,
+            "lots": "'" + _held_days(chosen.config, day),
+            "current_margin": 0,
+            "expected_return": round(float(curve["equity"].iloc[-1]), 2) if not curve.empty else 0,
+            "risk": _risk(curve, risk_by),
+        })
+    return pd.DataFrame(rows, columns=DESK_COLUMNS)
 
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]

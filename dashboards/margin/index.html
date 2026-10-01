@@ -199,6 +199,10 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
 .t-sn-w{--tone:var(--sn);--cell-pct:32%;}
 .t-sn-m{--tone:var(--sn);--cell-pct:58%;}
 /* only the expiry cell is filled; ID-scoped so the row-hover rule doesn't wash it out */
+.perf-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:12px;}
+.perf-cards .value{font-size:17px;}
+.perf-cards .sub{font-size:11px;color:var(--text-dim);margin-top:2px;font-family:var(--mono);}
+.perf-period{font-size:11.5px;color:var(--text-dim);margin-bottom:10px;}
 #weekTypeReportBody td.expiry-cell{background:color-mix(in srgb, var(--tone) var(--cell-pct), var(--panel));font-weight:700;}
 
 
@@ -442,6 +446,32 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
     </tr></thead>
     <tbody id="sizingOutBody"></tbody>
   </table>
+  </div>
+</div>
+
+<div class="panel" id="perfPanel">
+  <h2>performance (optimal allocation)<span class="info-icon" data-tip="Each strategy's daily P&amp;L scaled by its allocated peak-day margin ÷ margin @0DTE, added up by date.">?</span></h2>
+  <div id="perfEmptyMsg" class="empty-state">Run "Solve MILP" above first.</div>
+  <div id="perfBody" style="display:none;">
+    <div class="perf-period" id="perfPeriod"></div>
+    <div class="perf-cards" id="perfCards"></div>
+    <div class="notice" id="perfNote" style="display:none;"></div>
+    <div class="setup-label" style="margin-top:18px;">Per strategy</div>
+    <div class="table-scroll">
+    <table>
+      <thead><tr>
+        <th style="text-align:left;">strategy</th>
+        <th>P&amp;L scale<span class="info-icon" data-tip="Allocated peak-day margin ÷ margin @0DTE (the margin the P&amp;L was earned on). Daily P&amp;L is multiplied by this.">?</span></th>
+        <th>total P&amp;L</th>
+        <th>share of P&amp;L<span class="info-icon" data-tip="This strategy's total P&amp;L ÷ the portfolio's.">?</span></th>
+        <th>Sharpe</th>
+        <th>Sortino</th>
+        <th>max drawdown</th>
+        <th>win rate</th>
+      </tr></thead>
+      <tbody id="perfStratBody"></tbody>
+    </table>
+    </div>
   </div>
 </div>
 
@@ -889,6 +919,108 @@ function renderTotals(){
   const cap = num(document.getElementById('totalCapital').value);
   renderWeekTypeReport(cap);
   renderSizing();
+  renderPerformance();
+}
+
+// ---------- PERFORMANCE (optimal allocation) ----------
+// Each strategy's daily_pnl is the P&L earned with margin @0DTE deployed (e.g. $6M).
+// It is scaled by (allocated peak-day margin ÷ margin @0DTE) — NOT by the solver's
+// dial, whose dial = 1 means margin @0DTE run through the DTE curve (e.g. $6M × √5
+// on a 4-DTE day). Scaled series are added up by date; the metrics come from that.
+// Annualised on 252 trading days, risk-free rate 0, % figures against total capital.
+function pnlMetrics(values, cap){
+  const n = values.length;
+  const total = values.reduce((a,b)=>a+b, 0);
+  const mean = n ? total/n : 0;
+  const std = n > 1 ? Math.sqrt(values.reduce((a,v)=>a+(v-mean)*(v-mean), 0)/(n-1)) : 0;
+  const downside = n ? Math.sqrt(values.reduce((a,v)=>a+Math.min(v,0)*Math.min(v,0), 0)/n) : 0;
+  let cum = 0, peak = 0, maxDD = 0;
+  values.forEach(v => { cum += v; peak = Math.max(peak, cum); maxDD = Math.max(maxDD, peak - cum); });
+  const active = values.filter(v => v !== 0);
+  return {
+    days: n, total,
+    roc: cap > 0 ? total/cap : null,
+    annual: cap > 0 && n ? (total/cap) * 252/n : null,
+    sharpe: std > 0 ? mean/std * Math.sqrt(252) : null,
+    sortino: downside > 0 ? mean/downside * Math.sqrt(252) : null,
+    maxDD, maxDDPct: cap > 0 ? maxDD/cap : null,
+    calmar: maxDD > 0 && n ? (total*252/n)/maxDD : null,
+    winRate: active.length ? active.filter(v=>v>0).length/active.length : null,
+    best: n ? Math.max(...values) : null, worst: n ? Math.min(...values) : null
+  };
+}
+
+function renderPerformance(){
+  const emptyMsg = document.getElementById('perfEmptyMsg');
+  const body = document.getElementById('perfBody');
+  const withPnl = state.strategies.filter(s => s.dailyPnl && Object.keys(s.dailyPnl).length);
+  let why = '';
+  if(!state.strategies.length) why = 'No strategies yet — add some on the table above.';
+  else if(!withPnl.length) why = 'No daily P&L data — upload a file with a daily_pnl column.';
+  else if(!lastOptimalScales) why = 'Run "Solve MILP" above first.';
+  emptyMsg.style.display = why ? 'block' : 'none';
+  emptyMsg.textContent = why;
+  body.style.display = why ? 'none' : 'block';
+  if(why) return;
+
+  const cap = num(document.getElementById('totalCapital').value);
+  const dates = [...new Set(withPnl.flatMap(s => Object.keys(s.dailyPnl)))].sort();
+  const dialOf = i => lastOptimalScales[i] || 0;
+  // P&L multiplier: margin the allocation actually ties up on its heaviest day,
+  // relative to the margin the daily_pnl was earned on.
+  const pnlScale = (s, i) => num(s.margin0DTE) > 0 ? dialOf(i) * peakUnitMargin(s) / num(s.margin0DTE) : 0;
+  const scaled = (s, i) => dates.map(d => pnlScale(s, i) * (s.dailyPnl && s.dailyPnl[d] || 0)); // missing day = 0
+  const portfolio = dates.map(() => 0);
+  state.strategies.forEach((s, i) => { if(s.dailyPnl) scaled(s, i).forEach((v, j) => { portfolio[j] += v; }); });
+  const m = pnlMetrics(portfolio, cap);
+
+  const pct = v => v === null ? '—' : (v*100).toFixed(1) + '%';
+  const money = v => v === null ? '—' : (v < 0 ? '−' + fmt(-v) : fmt(v)); // −$1,234 rather than $-1,234
+  const ratio = v => v === null ? '—' : v.toFixed(2);
+  document.getElementById('perfPeriod').textContent = dates[0] + ' → ' + dates[dates.length-1] + ' · ' + m.days + ' trading days';
+  const cards = [
+    ['total P&L', money(m.total), '', 'Sum of the portfolio\'s daily P&L over the period.'],
+    ['return on capital', pct(m.roc), '', 'Total P&L ÷ total margin capital.'],
+    ['annualised return', pct(m.annual), '', 'Return on capital scaled to a year (252 trading days).'],
+    ['Sharpe', ratio(m.sharpe), '', 'Average daily P&L ÷ its standard deviation, ×√252.'],
+    ['Sortino', ratio(m.sortino), '', 'Like Sharpe, but only losing days count as risk.'],
+    ['max drawdown', fmt(m.maxDD), pct(m.maxDDPct) + ' of capital', 'Largest fall from a peak in cumulative P&L.'],
+    ['Calmar', ratio(m.calmar), '', 'Annualised return ÷ max drawdown.'],
+    ['win rate', pct(m.winRate), '', 'Days with a gain, out of days with any P&L.'],
+    ['best day', money(m.best), '', 'Largest one-day gain.'],
+    ['worst day', money(m.worst), '', 'Largest one-day loss.']
+  ];
+  const esc = t => String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  document.getElementById('perfCards').innerHTML = cards.map(([label, value, sub, tip]) =>
+    `<div class="summary-card"><div class="label">${label}<span class="info-icon" data-tip="${esc(tip)}">?</span></div>` +
+    `<div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`).join('');
+
+  const missing = state.strategies.filter((s, i) => dialOf(i) > 0 && (!s.dailyPnl || !(num(s.margin0DTE) > 0))).map(s => s.name);
+  const note = document.getElementById('perfNote');
+  note.style.display = missing.length ? 'block' : 'none';
+  note.textContent = missing.length ? 'No daily P&L or margin @0DTE for ' + missing.join(', ') + ' — left out of these figures.' : '';
+
+  const tbody = document.getElementById('perfStratBody');
+  tbody.innerHTML = '';
+  state.strategies.forEach((s, i) => {
+    const tr = document.createElement('tr');
+    const cell = (t, left) => { const td = document.createElement('td'); if(left) td.style.textAlign = 'left'; td.textContent = t; tr.appendChild(td); };
+    cell(s.name, true);
+    cell(pnlScale(s, i).toFixed(2));
+    if(!s.dailyPnl){ cell('no P&L data'); for(let k=0;k<5;k++) cell('—'); }
+    else if(dialOf(i) <= 0){ cell('not run'); for(let k=0;k<5;k++) cell('—'); }
+    else if(!(num(s.margin0DTE) > 0)){ cell('no margin @0DTE'); for(let k=0;k<5;k++) cell('—'); }
+    else{
+      const sm = pnlMetrics(scaled(s, i), cap);
+      cell(money(sm.total));
+      cell(m.total !== 0 ? (sm.total/m.total*100).toFixed(1) + '%' : '—');
+      cell(ratio(sm.sharpe));
+      cell(ratio(sm.sortino));
+      cell(fmt(sm.maxDD));
+      cell(pct(sm.winRate));
+    }
+    tbody.appendChild(tr);
+  });
 }
 
 // ---------- LOTS & TRADE INTERVAL ----------
@@ -1206,6 +1338,16 @@ document.getElementById('resetStrats').addEventListener('click', function(){
 });
 
 // ---------- FILE UPLOAD (xlsx / csv) ----------
+// daily_pnl column: a JSON object {"YYYY-MM-DD": pnl, ...} of the strategy's P&L at
+// dial = 1. Returns a clean {date: number} map, or null if it can't be read.
+function parsePnlSeries(v){
+  let obj = v;
+  if(typeof v === 'string'){ if(!v.trim()) return null; try{ obj = JSON.parse(v); }catch(e){ return null; } }
+  if(!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const out = {};
+  Object.entries(obj).forEach(([d, p]) => { const n = Number(p); if(/^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(n)) out[d] = n; });
+  return Object.keys(out).length ? out : null;
+}
 function normalizeHeader(h){ return String(h||'').trim().toLowerCase().replace(/[\s_]+/g,''); }
 document.getElementById('fileUpload').addEventListener('change', (e)=>{
   const file = e.target.files[0];
@@ -1233,6 +1375,8 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
       const riskCol = findCol('risk');
       const lotsCol = findCol('lots','lotstring','lotpattern');
       const m0Col = findCol('margin0dte','0dtemargin','margin0');
+      const pnlCol = findCol('dailypnl','pnl','pnlseries');
+      let badPnl = 0;
       const indepCols = {mon:findCol('marginmon','mon'), tue:findCol('margintue','tue'), wed:findCol('marginwed','wed'), thu:findCol('marginthu','thu'), fri:findCol('marginfri','fri')};
 
       const parsed = rows.map(r=>{
@@ -1250,6 +1394,7 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
           risk: riskCol ? num(r[riskCol]) : 0,
           lotString: lotsCol ? String(r[lotsCol]).replace(/[^0-9]/g,'').slice(0,5) : '00000',
           margin0DTE: m0Col ? num(r[m0Col]) : 0,
+          dailyPnl: pnlCol ? (parsePnlSeries(r[pnlCol]) || (String(r[pnlCol]).trim() ? (badPnl++, null) : null)) : null,
           indepMargins: hasIndep ? {
             mon: indepCols.mon ? num(r[indepCols.mon]) : 0,
             tue: indepCols.tue ? num(r[indepCols.tue]) : 0,
@@ -1270,7 +1415,10 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
         s.margin0DTE = clamp(s.margin0DTE);
         WEEKDAYS.forEach(d => { s.indepMargins[d] = clamp(s.indepMargins[d]); });
       });
-      if(negCount) showToast(negCount + ' negative margin value' + (negCount>1?'s':'') + ' in the file ' + (negCount>1?'were':'was') + ' set to 0 — margin cannot be negative.', true);
+      const warnings = [];
+      if(negCount) warnings.push(negCount + ' negative margin value' + (negCount>1?'s':'') + ' in the file ' + (negCount>1?'were':'was') + ' set to 0 — margin cannot be negative.');
+      if(badPnl) warnings.push(badPnl + ' daily_pnl value' + (badPnl>1?'s':'') + ' could not be read — expected {"YYYY-MM-DD": pnl, …}.');
+      if(warnings.length) showToast(warnings.join(' '), true);
 
       if(!parsed.length){ showToast('Could not find valid rows — check the index column has NF/BN/SN.', true); return; }
       state.strategies = state.strategies.concat(parsed);

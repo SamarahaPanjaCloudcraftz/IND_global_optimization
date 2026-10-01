@@ -15,6 +15,7 @@ class Nifty(DowCondor):
     underlying = "NIFTY"
     lot_size = 65
     unit_size_default = 260
+    trade_interval_time = 5     # minutes; SENSEX keeps the shared 3
     expiry_weekday = 1          # Tuesday
     data_dir = "/home/oem/Documents/unit_tasks/IND_short_vol/preproc_data/NIFTY/"
     period = (date(2026, 1, 1), date(2026, 9, 2))

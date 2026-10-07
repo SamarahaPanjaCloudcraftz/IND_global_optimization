@@ -44,22 +44,29 @@ def _against(value: float, reference: float, form: str) -> str:
 
 def render(scope: str, roots: list[str], weekdays_of: dict[str, list[str]],
            variants: Callable, config_of: dict, curve: Callable,
-           selling_day_axes: set[str], bases: list[str], basis_note: str) -> dict:
+           selling_day_axes: set[str], bases: list[str], basis_note: str,
+           choose_n: bool = False) -> dict:
     """Draw the summary and return the winners it picked.
 
     `variants(root, weekday)` -> (choices, branch_of, base job, baseline keys).
     `curve(job, weekday)` gives a job's equity, restricted to one weekday's P&L
     when a weekday is given — used by axes in `selling_day_axes` when toggled.
 
-    Returns {axis: {weekday: (job, is_baseline, display label)}}, leaving out a
-    weekday where no variant matches the filters.
+    With `choose_n`, each axis box has its own n — how many of its best
+    variants to pick — otherwise every axis picks one.
+
+    Returns {axis: {weekday: [(job, is_baseline, display label), ...]}}, the top
+    n best first, leaving out a weekday where nothing was picked.
     """
     winners: dict[str, dict] = {}
-    st.caption("The best variant of each axis × weekday table, ranked exactly as in the "
-               "detail view — by the composite unless a box's \"Top by\" picks a single "
-               "metric. P&L and drawdown are in ₹ on the baseline's margin. Brackets show "
-               "the change from that weekday's baseline — positive is better, for "
-               "drawdown too. Filters under an axis apply to all of its weekdays.")
+    st.caption(("The top n variants of each axis × weekday table, n set per axis, "
+                if choose_n else "The best variant of each axis × weekday table, ") +
+               "picked by the multi-objective selector unless a box's \"Top by\" picks the "
+               "composite or a single metric, on the same table as the detail view. "
+               "P&L and drawdown are in ₹ "
+               "on the baseline's margin. Brackets show the change from that weekday's "
+               "baseline — positive is better, for drawdown too. Filters under an axis "
+               "apply to all of its weekdays.")
 
     weekdays = [w for w in baseline.WEEKDAYS
                 if any(w in days for days in weekdays_of.values())]
@@ -93,8 +100,14 @@ def render(scope: str, roots: list[str], weekdays_of: dict[str, list[str]],
         with st.container(border=True):
             st.subheader(root, icon=":material/emoji_events:")
             with st.container(horizontal=True, gap="large"):
-                basis = st.segmented_control("Top by", ranking.TOP_BY, default="Composite",
-                                             key=f"{scope}:summary:{root}:by") or "Composite"
+                basis = st.segmented_control("Top by", ranking.TOP_BY, default=ranking.SELECTOR,
+                                             key=f"{scope}:summary:{root}:by") or ranking.SELECTOR
+                n = int(st.number_input(
+                    "n", min_value=1, max_value=5, value=1, step=1,
+                    key=f"{scope}:combine:n:{root}",
+                    help="How many of this axis's best variants carry into the combinations. "
+                         "Round 1 combines every mix across the axes, so backtests multiply.")
+                        ) if choose_n else 1
                 selling_only = root in selling_day_axes and st.segmented_control(
                     "P&L basis", bases, default=bases[0],
                     key=f"{scope}:summary:{root}:basis") == bases[1]
@@ -102,32 +115,41 @@ def render(scope: str, roots: list[str], weekdays_of: dict[str, list[str]],
                 st.caption(basis_note)
             passing = filters.render(f"{scope}:summary:{root}", candidates, mode_of, weekday_of)
             pooled = any(mode_of.values())
-            rows = []
+            rows, notes = [], []
             for weekday in weekdays_of[root]:
                 choices, branch_of, base, is_base = per_day[weekday]
                 kept = [k for k in choices if f"{weekday}|{k}" in passing]
-                row = {"Weekday": weekday}
+                picked, reason = pd.DataFrame(), "no variant matches the filters"
                 if kept:
                     ref = margin.margin_factor(config_of[base.digest]) if base else 1.0
                     day = baseline.WEEKDAYS.index(weekday) if selling_only else None
                     table = _metrics(kept + sorted(is_base), choices, config_of, curve, ref, day)
-                    top = ranking.best(table, basis)
-                    reference = table[table["Variant"].isin(is_base)]
+                    picked, said = ranking.top(table, basis, n)
+                    notes += [f"{weekday}: {note}" for note in said]
+                    reference = table[table["Variant"].isin(is_base)] if len(table) else table
+                    reason = ("nothing picked — see the note below" if len(table)
+                              else "no equity data in the date range")
+                for position, (_, top) in enumerate(picked.iterrows(), start=1):
+                    row = {"Weekday": weekday, **({"#": position} if n > 1 else {})}
                     mode, label = branch_of[top["Variant"]]
                     if pooled:
                         row["Mode / Method"] = mode or "—"
                     row["Top variant"] = "baseline" if top["Variant"] in is_base else label
                     shown = "baseline" if top["Variant"] in is_base else (
                         f"{mode} · {label}" if mode else label)
-                    winners.setdefault(root, {})[weekday] = (
-                        choices[top["Variant"]], top["Variant"] in is_base, shown)
+                    winners.setdefault(root, {}).setdefault(weekday, []).append(
+                        (choices[top["Variant"]], top["Variant"] in is_base, shown))
                     for name in METRICS:
                         row[name] = (_against(top[name], reference.iloc[0][name], FORMATS[name])
                                      if len(reference) else FORMATS[name].format(top[name]))
-                else:
+                    rows.append(row)
+                if picked.empty:
+                    row = {"Weekday": weekday, **({"#": "—"} if n > 1 else {})}
                     if pooled:
                         row["Mode / Method"] = "—"
-                    row["Top variant"] = "no variant matches the filters"
-                rows.append(row)
+                    row["Top variant"] = reason
+                    rows.append(row)
             _show(rows, numeric=False)
+            for note in notes:
+                st.caption(note)
     return winners

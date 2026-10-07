@@ -69,8 +69,12 @@ def _grain(view: View, suffix: str) -> str:
 def _ranking(view: View) -> None:
     st.caption("P&L and drawdown are in ₹, as each variant would earn on the baseline's "
                "margin. Ranks: 1 is best, ties share the average. Composite is the "
-               "weighted sum of the three ranks — lower is better.")
-    table = ranking.table(view.frames, view.margins, view.reference)
+               "weighted sum of the three ranks — lower is better. The Selector columns "
+               "are the multi-objective selector's verdict: Pareto front (1 = beaten by "
+               "nothing), score (lower is better), its rank, status and reason.")
+    table, notes = ranking.selector_audit(ranking.table(view.frames, view.margins, view.reference))
+    for note in notes:
+        st.caption(note)
     keys = table["Variant"].copy()
     if any(middle for middle, _ in view.branches.values()):
         table.insert(0, "Mode / Method", [view.branches.get(k, ("", k))[0] or "—" for k in keys])
@@ -78,6 +82,7 @@ def _ranking(view: View) -> None:
     rupees = "{:,.0f}"
     formats = {"Final P&L": rupees, "Max drawdown": rupees, "Sortino": "{:.2f}"}
     formats.update({c: "{:g}" for c in table.columns if c.endswith("rank") or c == "Composite"})
+    formats["Selector score"] = "{:.3f}"
 
     # The baseline is ranked with everything else; its row is repeated above the
     # table so the reference numbers are in view however far down it ranks.

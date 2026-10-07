@@ -1,8 +1,16 @@
 # Variant selector: design
 
-Status: design agreed, ready to build. The selector is a **standalone module**: it reads a table
-and a config, and returns a selection plus an audit. Wiring it into the dashboard or the engine
-comes later and is out of scope here.
+Status: built and wired into the analysis dashboard. The selector is a **standalone module**: it
+reads a table and a config, and returns a selection plus an audit.
+
+**Wiring (2026-10-07).** `ranking.top(table, "Selector", n)` calls `select()` with `default.toml`
+and `n` overridden, on exactly the ranked table the page shows (baseline row included). "Selector"
+is one more choice in every Top-by / Best-by control (Summary, best of each group,
+recommendation), and the default in each of them. When the selector picks nothing (D11, or a config
+or data error) the page says why and picks nothing — it never falls back to another basis. The
+detail view's Ranking table and the Combine page's candidate tables show each row's front,
+score, rank, status and reason (`ranking.selector_audit`). The Combine page's n sets how many
+picks each axis carries into the combinations.
 
 Because it is standalone, it cannot rely on its callers having checked anything. Every input it
 receives (the config and the data) is checked against an explicit list of errors (§5, §6) before

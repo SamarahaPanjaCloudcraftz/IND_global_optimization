@@ -6,6 +6,10 @@ Per weekday:
   sell   S = condor + signal-strength + trade-time  S* = best of {the three, S}
   final  F = H* + S*                                answer = best of {H*, S*, F}
 
+With n picks per axis (the Combine page's n), H, S and F are every distinct
+mix of the picks, and H* and S* are the top n of their groups; n = 1 is the
+scheme above.
+
 Every candidate is the weekday's baseline config with some axes' own keys laid
 over it. A key belongs to an axis when some job of that axis differs from the
 control on it — which picks up pinned parameters (gamma_hedge = True) as well

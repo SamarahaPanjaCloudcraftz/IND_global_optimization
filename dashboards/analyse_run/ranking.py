@@ -3,11 +3,19 @@
 Each metric is computed on margin-normalised P&L, ranked (1 = best, ties share
 the average rank), and the ranks are combined by weighted sum into a composite
 where lower is better. Metrics, directions and weights all live here.
+
+A table can also be ordered by the multi-objective selector (`selector/`),
+driven by `selector/default.toml`, whose metric names are this table's columns.
 """
+
+from dataclasses import replace
+from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+import selector
 import series
 
 WEIGHTS = {"Final P&L": 1.0, "Max drawdown": 1.0, "Sortino": 1.0}
@@ -16,16 +24,65 @@ WEIGHTS = {"Final P&L": 1.0, "Max drawdown": 1.0, "Sortino": 1.0}
 HIGHER_IS_BETTER = {"Final P&L": True, "Max drawdown": True, "Sortino": True}
 
 
-TOP_BY = ["Composite", "Final P&L", "Sortino", "Max drawdown"]
+SELECTOR = "Selector"
+TOP_BY = [SELECTOR, "Composite", "Final P&L", "Sortino", "Max drawdown"]
+SELECTOR_CONFIG = Path(__file__).resolve().parent / "selector" / "default.toml"
 
 
-def best(table: pd.DataFrame, basis: str) -> pd.Series:
-    """The best row of a ranked table on one basis: the composite, or a single
-    metric's rank. Ranks are already direction-aware (1 = best); ties fall to
-    the composite."""
+@lru_cache(maxsize=1)
+def _selector_config() -> "selector.Config":
+    return selector.load(SELECTOR_CONFIG)
+
+
+def top(table: pd.DataFrame, basis: str, n: int = 1) -> tuple[pd.DataFrame, list[str]]:
+    """The best `n` rows of a ranked table on one basis, best first, and any
+    notes to show with them.
+
+    Composite and single-metric bases order by rank (1 = best; a metric's ties
+    fall to the composite). The selector picks with its own Pareto-and-score
+    method; when it can pick nothing — every variant invalid, or a config or
+    data error — no rows come back and the notes say why. It never falls back
+    to another basis.
+    """
+    if table.empty:
+        return table, []
+    if basis == SELECTOR:
+        try:
+            result = selector.select(table, replace(_selector_config(), n=n))
+        except (selector.ConfigError, selector.DataError) as error:
+            return table.iloc[0:0], [f"Selector: {error}"]
+        notes = [f"Selector: {warning}" for warning in result.run["warnings"]]
+        rows = table.set_index("Variant", drop=False).loc[result.selected]
+        return rows.reset_index(drop=True), notes
     if basis == "Composite":
-        return table.iloc[0]
-    return table.sort_values([f"{basis} rank", "Composite"], kind="stable").iloc[0]
+        ordered = table
+    else:
+        ordered = table.sort_values([f"{basis} rank", "Composite"], kind="stable")
+    return ordered.head(n).reset_index(drop=True), []
+
+
+def best(table: pd.DataFrame, basis: str) -> pd.Series | None:
+    """The best row on one basis, or None when the basis picks nothing."""
+    rows, _ = top(table, basis, 1)
+    return rows.iloc[0] if len(rows) else None
+
+
+def selector_audit(table: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """The table with the selector's verdict on every row: its Pareto front,
+    score (lower is better), rank, status and reason. Notes as for `top`."""
+    if table.empty:
+        return table, []
+    try:
+        result = selector.select(table, replace(_selector_config(), n=1))
+    except (selector.ConfigError, selector.DataError) as error:
+        return table, [f"Selector: {error}"]
+    audit = result.audit.rename(columns={"front": "Front", "score": "Selector score",
+                                         "rank": "Selector rank", "status": "Selector status",
+                                         "reason": "Selector reason"})
+    keep = ["Variant", "Front", "Selector score", "Selector rank", "Selector status",
+            "Selector reason"]
+    merged = table.merge(audit[keep], on="Variant", how="left", validate="one_to_one")
+    return merged, [f"Selector: {warning}" for warning in result.run["warnings"]]
 
 
 def sortino(daily: pd.Series) -> float:

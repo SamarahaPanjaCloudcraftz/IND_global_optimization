@@ -1,13 +1,16 @@
 """The combine view: backtest combinations of the summary's axis winners and
 read back which one to recommend for each weekday.
 
-Rounds follow combine.py — round 1 runs H and S, round 2 runs F. Each round is
+Rounds follow combine.py — round 1 runs H and S, round 2 runs F; with n picks
+per axis, every distinct mix of them. Every best-of step can rank by the
+composite, one metric, or the multi-objective selector (see ranking.top). Each round is
 a plan written from here and executed by run_plan.py, whose command is shown
 once the plan exists. Anything that already has a backtest doing the same thing
 is reused rather than run again. A section only appears once every result it
 compares exists, so no best-of is ever read off a half-finished round.
 """
 
+import itertools
 import json
 import re
 import shutil
@@ -53,26 +56,35 @@ def _describe(contrib: dict, day: int) -> str:
 def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: list[str],
            base_of: Callable, equity_of: Callable) -> None:
     """`base_of(weekday)` is the weekday's baseline job; `equity_of(path)` a
-    backtest directory's equity inside the selected date range."""
+    backtest directory's equity inside the selected date range. `winners` holds
+    each axis's top picks per weekday, best first — as many as that axis's n.
+    The best-of step has its own n for hedges and for sells, and the
+    recommendation shows its own top n. With every n at 1 each step keeps one
+    candidate per weekday."""
     natives, owned = _stage(str(stage_dir), (stage_dir / "plan.json").stat().st_mtime)
     index = C.results_index(stage_dir, natives)
 
     st.caption("Combinations of the winners picked above, per weekday. H = delta + gamma "
                "winners, S = condor + signal-strength + trade-time winners, F = best hedge "
-               "+ best sell. Best-of steps rank on the full period, with the baseline in "
-               "every comparison. P&L and drawdown are in ₹ on the baseline's margin.")
+               "+ best sell; where an n is above 1, every mix of the picks. Best-of steps rank on the "
+               "full period, with the baseline in every comparison. P&L and drawdown are in "
+               "₹ on the baseline's margin.")
 
     def result(candidate: C.Candidate) -> Path | None:
         return index.get(C.effective_hash(candidate.config))
 
-    def winner(root: str, weekday: str, base_config: dict) -> C.Candidate:
-        pick = winners.get(root, {}).get(weekday)
-        if not pick or pick[1]:
-            label = "baseline" if pick else "baseline (no variant matched the filters)"
-            return C.Candidate(root, label, {}, C.compose(base_config, {}))
-        job, _, label = pick
-        contrib = C.contribution(root, natives[job.digest], owned)
-        return C.Candidate(root, label, contrib, C.compose(base_config, contrib))
+    def axis_picks(root: str, weekday: str, base_config: dict) -> list[C.Candidate]:
+        """The axis's picks for the weekday as candidates, best first."""
+        chosen = winners.get(root, {}).get(weekday) or []
+        if not chosen:
+            return [C.Candidate(root, "baseline (nothing picked)", {}, C.compose(base_config, {}))]
+        out = []
+        for position, (job, is_base, label) in enumerate(chosen, start=1):
+            name = root if len(chosen) == 1 else f"{root} #{position}"
+            contrib = {} if is_base else C.contribution(root, natives[job.digest], owned)
+            out.append(C.Candidate(name, "baseline" if is_base else label, contrib,
+                                   C.compose(base_config, contrib)))
+        return out
 
     def combined(name: str, parts: list[C.Candidate], base_config: dict) -> C.Candidate:
         contrib = {k: v for part in parts for k, v in part.contrib.items()}
@@ -80,8 +92,23 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
         return C.Candidate(name, label, contrib, C.compose(base_config, contrib),
                            [p.name for p in parts])
 
-    def ranked(candidates: list[C.Candidate], base_config: dict, basis: str):
-        """(full table, best row, baseline row) over candidates with results."""
+    def mixes(kind: str, groups: list[list[C.Candidate]], base_config: dict) -> list[C.Candidate]:
+        """Every mix of one candidate from each group, without two that run the
+        same backtest. Named `kind` when there is one, kind1, kind2, ... otherwise."""
+        out, seen = [], set()
+        for parts in itertools.product(*groups):
+            mix = combined(kind, list(parts), base_config)
+            digest = C.effective_hash(mix.config)
+            if digest not in seen:
+                seen.add(digest)
+                out.append(mix)
+        if len(out) > 1:
+            for position, mix in enumerate(out, start=1):
+                mix.name = f"{kind}{position}"
+        return out
+
+    def ranked(candidates: list[C.Candidate], base_config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """(full table, baseline row) over the candidates that have results."""
         frames, margins = {}, {}
         for c in candidates:
             path = result(c)
@@ -91,15 +118,38 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
         frames = {k: f for k, f in frames.items() if not f.empty}
         reference = margin.margin_factor(C.as_json(base_config))
         table = ranking.table(frames, margins, reference)
-        return table, ranking.best(table, basis), table[table["Variant"] == "baseline"]
+        return table, table[table["Variant"] == "baseline"]
 
-    def row_of(weekday: str, picked: C.Candidate, top: pd.Series, base_row: pd.DataFrame) -> dict:
-        row = {"Weekday": weekday, "Pick": picked.name,
+    def best_of(candidates: list[C.Candidate], base_config: dict, basis: str, count: int):
+        """The top `count` candidates on a basis, never two that run the same
+        backtest: (table, [(candidate, its row)], baseline row, notes)."""
+        table, base_row = ranked(candidates, base_config)
+        order, notes = ranking.top(table, basis, len(table))
+        by_name = {c.name: c for c in candidates}
+        chosen, seen = [], set()
+        for _, row in order.iterrows():
+            candidate = by_name[row["Variant"]]
+            digest = C.effective_hash(candidate.config)
+            if digest in seen:
+                continue
+            seen.add(digest)
+            chosen.append((candidate, row))
+            if len(chosen) == count:
+                break
+        return table, chosen, base_row, notes
+
+    def row_of(weekday: str, picked: C.Candidate, top: pd.Series, base_row: pd.DataFrame,
+               position: int, count: int) -> dict:
+        row = {"Weekday": weekday, **({"#": position} if count > 1 else {}), "Pick": picked.name,
                "Changes from baseline": _describe(picked.contrib, WEEKDAYS.index(weekday))}
         for name in METRICS:
             row[name] = (_against(top[name], base_row.iloc[0][name], FORMATS[name])
                          if len(base_row) else FORMATS[name].format(top[name]))
         return row
+
+    def show_notes(notes: list[str]) -> None:
+        for note in notes:
+            st.caption(note)
 
     # ---- candidates per weekday
     plan = {}
@@ -108,9 +158,9 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
         if base_job is None or base_job.digest not in natives:
             continue
         base_config = C.compose(natives[base_job.digest], {})
-        axis = {root: winner(root, weekday, base_config) for root in C.HEDGE_AXES + C.SELL_AXES}
-        hedge = combined("H", [axis[r] for r in C.HEDGE_AXES], base_config)
-        sell = combined("S", [axis[r] for r in C.SELL_AXES], base_config)
+        axis = {root: axis_picks(root, weekday, base_config) for root in C.HEDGE_AXES + C.SELL_AXES}
+        hedge = mixes("H", [axis[r] for r in C.HEDGE_AXES], base_config)
+        sell = mixes("S", [axis[r] for r in C.SELL_AXES], base_config)
         baseline = C.Candidate("baseline", "baseline", {}, base_config)
         plan[weekday] = dict(base=base_config, axis=axis, H=hedge, S=sell, baseline=baseline)
 
@@ -119,17 +169,16 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
         st.subheader("Round 1 — hedge and sell combinations", icon=":material/merge:")
         rows, wanted = [], []
         for weekday, p in plan.items():
-            rows.append({"Weekday": weekday,
-                         "H = delta + gamma": p["H"].label,
-                         "H": "✓ has a result" if result(p["H"]) else "to run",
-                         "S = condor + signal + time": p["S"].label,
-                         "S": "✓ has a result" if result(p["S"]) else "to run"})
-            for kind in ("H", "S"):
-                if not result(p[kind]):
-                    wanted.append((f"{weekday}/{'hedge' if kind == 'H' else 'sell'}", p[kind].config))
+            for kind, title in (("H", "H = delta + gamma"), ("S", "S = condor + signal + time")):
+                for mix in p[kind]:
+                    rows.append({"Weekday": weekday, "Combination": mix.name, "Of": title,
+                                 "What": mix.label,
+                                 "Result": "✓ has a result" if result(mix) else "to run"})
+                    if not result(mix):
+                        wanted.append((f"{weekday}/{'hedge' if kind == 'H' else 'sell'}", mix.config))
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         _controls(stage_dir, scope, strategy, "round1", wanted)
-    if any(not result(p[k]) for p in plan.values() for k in ("H", "S")):
+    if any(not result(mix) for p in plan.values() for k in ("H", "S") for mix in p[k]):
         st.info("The best-of step and round 2 appear once every round 1 backtest has a result.",
                 icon=":material/hourglass_top:")
         return
@@ -138,42 +187,59 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
     with st.container(border=True):
         st.subheader("Best of each group", icon=":material/workspace_premium:")
         with st.container(horizontal=True, gap="large"):
-            hedge_by = st.segmented_control("Hedge best by", ranking.TOP_BY, default="Composite",
-                                            key=f"{scope}:combine:hedge:by") or "Composite"
-            sell_by = st.segmented_control("Sell best by", ranking.TOP_BY, default="Composite",
-                                           key=f"{scope}:combine:sell:by") or "Composite"
-        groups = {"Hedge": ("H", C.HEDGE_AXES, hedge_by), "Sell": ("S", C.SELL_AXES, sell_by)}
-        for title, (kind, roots, basis) in groups.items():
-            rows, full = [], {}
+            hedge_by = st.segmented_control("Hedge best by", ranking.TOP_BY, default=ranking.SELECTOR,
+                                            key=f"{scope}:combine:hedge:by") or ranking.SELECTOR
+            hedge_n = int(st.number_input("Hedge n", min_value=1, max_value=5, value=1, step=1,
+                                key=f"{scope}:combine:hedge:n", help="How many hedges carry into round 2."))
+            sell_by = st.segmented_control("Sell best by", ranking.TOP_BY, default=ranking.SELECTOR,
+                                           key=f"{scope}:combine:sell:by") or ranking.SELECTOR
+            sell_n = int(st.number_input("Sell n", min_value=1, max_value=5, value=1, step=1,
+                                key=f"{scope}:combine:sell:n", help="How many sells carry into round 2. Round 2 runs every hedge x sell mix."))
+        groups = {"Hedge": ("H", C.HEDGE_AXES, hedge_by, hedge_n),
+                  "Sell": ("S", C.SELL_AXES, sell_by, sell_n)}
+        stuck = False
+        for title, (kind, roots, basis, count) in groups.items():
+            rows, full, notes = [], {}, []
             for weekday, p in plan.items():
-                pool = [p["axis"][r] for r in roots] + [p[kind], p["baseline"]]
-                table, top, base_row = ranked(pool, p["base"], basis)
-                chosen = next(c for c in pool if c.name == top["Variant"])
-                p[f"{kind}*"] = chosen
-                rows.append(row_of(weekday, chosen, top, base_row))
+                pool = [c for r in roots for c in p["axis"][r]] + p[kind] + [p["baseline"]]
+                table, chosen, base_row, said = best_of(pool, p["base"], basis, count)
+                notes += [f"{weekday}: {note}" for note in said]
+                p[f"{kind}*"] = [candidate for candidate, _ in chosen]
+                if not chosen:
+                    stuck = True
+                    rows.append({"Weekday": weekday, "Pick": "nothing picked — see the note below"})
+                for position, (candidate, row) in enumerate(chosen, start=1):
+                    rows.append(row_of(weekday, candidate, row, base_row, position, count))
                 full[weekday] = table
-            st.markdown(f"**{title}** — best of {', '.join(roots)}, {kind} and the baseline")
+            best = f"best {count}" if count > 1 else "best"
+            st.markdown(f"**{title}** — {best} of {', '.join(roots)}, {kind} and the baseline")
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            show_notes(notes)
             with st.expander(f"Every {title.lower()} candidate, per weekday"):
                 for weekday, table in full.items():
                     st.caption(weekday)
-                    st.dataframe(table.style.format({**FORMATS, **{c: "{:g}" for c in table.columns
-                                                                   if c.endswith("rank") or c == "Composite"}}),
-                                 hide_index=True, width="stretch")
+                    _show_ranked(table)
+    if stuck:
+        st.error("A best-of step picked nothing for some weekday, so round 2 can't be built. "
+                 "Choose another basis, or see the notes above.", icon=":material/error:")
+        return
 
     # ---- round 2
     with st.container(border=True):
         st.subheader("Round 2 — best hedge + best sell", icon=":material/merge:")
         rows, wanted = [], []
         for weekday, p in plan.items():
-            p["F"] = combined("F", [p["H*"], p["S*"]], p["base"])
-            rows.append({"Weekday": weekday, "Best hedge": p["H*"].name, "Best sell": p["S*"].name,
-                         "F": "✓ has a result" if result(p["F"]) else "to run"})
-            if not result(p["F"]):
-                wanted.append((f"{weekday}/final", p["F"].config))
+            p["F"] = mixes("F", [p["H*"], p["S*"]], p["base"])
+            for mix in p["F"]:
+                hedge_part, sell_part = mix.parts
+                rows.append({"Weekday": weekday, "Combination": mix.name, "Best hedge": hedge_part,
+                             "Best sell": sell_part,
+                             "Result": "✓ has a result" if result(mix) else "to run"})
+                if not result(mix):
+                    wanted.append((f"{weekday}/final", mix.config))
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         _controls(stage_dir, scope, strategy, "round2", wanted)
-    if any(not result(p["F"]) for p in plan.values()):
+    if any(not result(mix) for p in plan.values() for mix in p["F"]):
         st.info("The recommendation appears once every round 2 backtest has a result.",
                 icon=":material/hourglass_top:")
         return
@@ -181,22 +247,39 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
     # ---- recommendation
     with st.container(border=True):
         st.subheader("Recommendation", icon=":material/verified:")
-        st.caption("The best of nine, ranked together: each axis's winner, the combined "
-                   "hedge H, the combined sell S, F (best hedge + best sell) and the baseline.")
-        final_by = st.segmented_control("Best by", ranking.TOP_BY, default="Composite",
-                                        key=f"{scope}:combine:final:by") or "Composite"
-        rows, full, picks = [], {}, {}
+        st.caption("Every candidate ranked together: each axis's picks, the combined hedges "
+                   "H, the combined sells S, the F's (best hedge + best sell) and the baseline. "
+                   "The margin CSV and the recommendation folder take #1.")
+        with st.container(horizontal=True, gap="large"):
+            final_by = st.segmented_control("Best by", ranking.TOP_BY, default=ranking.SELECTOR,
+                                            key=f"{scope}:combine:final:by") or ranking.SELECTOR
+            final_n = int(st.number_input("Show top n", min_value=1, max_value=5, value=1, step=1,
+                                key=f"{scope}:combine:final:n", help="How many of the best to list per weekday; the CSV always takes #1."))
+        rows, full, picks, notes = [], {}, {}, []
         for weekday, p in plan.items():
-            named = {**{FINAL_NAMES[r]: p["axis"][r] for r in C.HEDGE_AXES + C.SELL_AXES},
-                     "combined hedge (H)": p["H"], "combined sell (S)": p["S"],
-                     "F (best hedge + best sell)": p["F"], "baseline": p["baseline"]}
-            pool = [C.Candidate(name, c.label, c.contrib, c.config) for name, c in named.items()]
-            table, top, base_row = ranked(pool, p["base"], final_by)
-            chosen = next(c for c in pool if c.name == top["Variant"])
-            rows.append(row_of(weekday, chosen, top, base_row))
+            named = []
+            for root in C.HEDGE_AXES + C.SELL_AXES:
+                for c in p["axis"][root]:
+                    named.append((FINAL_NAMES[root] + c.name[len(root):], c))
+            named += [(f"combined hedge ({c.name})", c) for c in p["H"]]
+            named += [(f"combined sell ({c.name})", c) for c in p["S"]]
+            named += [(f"{c.name} (best hedge + best sell)", c) for c in p["F"]]
+            named.append(("baseline", p["baseline"]))
+            pool = [C.Candidate(name, c.label, c.contrib, c.config) for name, c in named]
+            table, chosen, base_row, said = best_of(pool, p["base"], final_by, final_n)
+            notes += [f"{weekday}: {note}" for note in said]
             full[weekday] = table
-            picks[weekday] = chosen
+            if not chosen:
+                rows.append({"Weekday": weekday, "Pick": "nothing picked — see the note below"})
+                continue
+            for position, (candidate, row) in enumerate(chosen, start=1):
+                rows.append(row_of(weekday, candidate, row, base_row, position, final_n))
+            picks[weekday] = chosen[0][0]
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        show_notes(notes)
+        if picks and len(picks) < len(plan):
+            st.warning("Some weekdays have no pick, so the margin CSV would leave them out. "
+                       "Choose another basis, or see the notes above.", icon=":material/warning:")
         if picks:
             risk_by = st.segmented_control("Risk column", list(RISK_MEASURES), default=RISK_DEFAULT,
                                            key=f"{scope}:combine:csv-risk") or RISK_DEFAULT
@@ -232,14 +315,23 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
                        "daily_pnl its P&L per day in that range — all on the "
                        "baseline's margin, exactly as in the table. current_margin and the "
                        "min / max margins are left at 0, to be filled in on the desk.")
-        with st.expander("All nine candidates, per weekday"):
-            ranks = {c: "{:g}" for c in next(iter(full.values())).columns
-                     if c.endswith("rank") or c == "Composite"} if full else {}
+        with st.expander("All candidates, per weekday"):
             for weekday, table in full.items():
                 st.caption(weekday)
-                st.dataframe(table.style.format({**FORMATS, **ranks}), hide_index=True,
-                             width="stretch")
+                _show_ranked(table)
 
+
+def _show_ranked(table: pd.DataFrame) -> None:
+    """A best-of table with the selector's verdict on every row."""
+    table, notes = ranking.selector_audit(table)
+    formats = {**FORMATS, **{c: "{:g}" for c in table.columns
+                             if c.endswith("rank") or c == "Composite"},
+               "Selector score": "{:.3f}"}
+    st.dataframe(table.style.format({k: v for k, v in formats.items() if k in table.columns},
+                                    na_rep="—"),
+                 hide_index=True, width="stretch")
+    for note in notes:
+        st.caption(note)
 
 FINAL_NAMES = {"delta_hedging": "best delta hedge", "gamma_hedging": "best gamma hedge",
                "condor_OTM_outstrike": "best condor", "dow_signal_strength": "best unwind",

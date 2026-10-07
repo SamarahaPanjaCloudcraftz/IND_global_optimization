@@ -63,11 +63,16 @@ def pnl(equity: pd.DataFrame, grain: str = "Daily") -> pd.DataFrame:
 
 
 def drawdown(equity: pd.DataFrame) -> pd.DataFrame:
-    """Distance below the running peak, as (date, drawdown). Zero or negative."""
+    """Distance below the running peak, as (date, drawdown). Zero or negative.
+
+    The peak starts at 0, where every curve starts before its first day (a
+    window's curve is re-based to 0 at its start), so a loss on the first day
+    counts as drawdown rather than becoming the peak.
+    """
     if equity.empty:
         return pd.DataFrame(columns=["date", "drawdown"])
     out = equity.copy()
-    out["drawdown"] = out["equity"] - out["equity"].cummax()
+    out["drawdown"] = out["equity"] - out["equity"].cummax().clip(lower=0)
     return out[["date", "drawdown"]]
 
 

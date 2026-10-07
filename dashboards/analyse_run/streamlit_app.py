@@ -168,8 +168,11 @@ if view_mode in ("Summary", "Combine"):
     weekdays_of = {r: [w for w in baseline.WEEKDAYS if w in days[r]] for r in roots}
     if view_mode == "Combine":
         st.subheader("1 · Pick each axis's winner", icon=":material/tune:")
+    # In Combine each axis sets its own n: how many of its best variants carry
+    # into the combinations. The plain summary always shows one winner.
     winners = summary.render(scope, roots, weekdays_of, variants, config_of, curve,
-                             SELLING_DAY_AXES, BASES, BASIS_NOTE)
+                             SELLING_DAY_AXES, BASES, BASIS_NOTE,
+                             choose_n=view_mode == "Combine")
     if view_mode == "Combine":
         st.divider()
         st.subheader("2 · Combine them", icon=":material/merge:")

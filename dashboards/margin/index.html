@@ -199,6 +199,10 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
 .t-sn-w{--tone:var(--sn);--cell-pct:32%;}
 .t-sn-m{--tone:var(--sn);--cell-pct:58%;}
 /* only the expiry cell is filled; ID-scoped so the row-hover rule doesn't wash it out */
+.perf-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:12px;}
+.perf-cards .value{font-size:17px;}
+.perf-cards .sub{font-size:11px;color:var(--text-dim);margin-top:2px;font-family:var(--mono);}
+.perf-period{font-size:11.5px;color:var(--text-dim);margin-bottom:10px;}
 #weekTypeReportBody td.expiry-cell{background:color-mix(in srgb, var(--tone) var(--cell-pct), var(--panel));font-weight:700;}
 
 
@@ -288,7 +292,7 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
       <div class="segmented">
         <button class="seg-btn active" data-obj="total" id="objTotalBtn">Total utilization<span class="info-icon" data-tip="Use as much of your margin as possible across the week. May load some days heavily and leave others light.">?</span></button>
         <button class="seg-btn" data-obj="maximin" id="objMaximinBtn">Worst-day utilization<span class="info-icon" data-tip="Spread the load evenly, so no single day ends up badly underused or overloaded compared to the rest.">?</span></button>
-        <button class="seg-btn" data-obj="riskadj" id="objRiskBtn">Risk-adjusted return<span class="info-icon" data-tip="Aim for the best return for the risk taken, using the expected return and risk numbers you enter per strategy — as dollar amounts (not %) for one full run of the strategy, over the period matching your horizon (a week, or the whole month).">?</span></button>
+        <button class="seg-btn" data-obj="riskadj" id="objRiskBtn">Risk-adjusted return<span class="info-icon" data-tip="Best return for the risk taken. Uses each strategy's expected return and risk, scaled to the margin you give it.">?</span></button>
       </div>
       <div id="lambdaRow" class="field-row" style="display:none;margin-top:10px;max-width:280px;">
         <label>Risk aversion λ<span class="info-icon" data-tip="How much risk counts against return. Score = return − λ × risk. 0 ignores risk; higher avoids it.">?</span></label>
@@ -344,9 +348,10 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
     <span style="flex:1;">strategies</span>
     <div class="segmented" style="margin-left:auto;">
       <button class="seg-btn active" id="marginModeDteBtn" data-mode="dte">Derive from DTE curve</button>
+      <button class="seg-btn" id="marginModeHalfBtn" data-mode="half">Expiry 0DTE, other days ½</button>
       <button class="seg-btn" id="marginModeIndepBtn" data-mode="independent">Independent by weekday</button>
     </div>
-    <span class="info-icon" data-tip="Derive from DTE curve: enter lots per weekday + a margin @0DTE, and every day's margin is worked out from the DTE curve. Independent by weekday: skip the curve entirely and type the actual $ margin for each weekday directly — five separate numbers with no formula tying them together. Switching doesn't erase the other mode's numbers, so you can flip back.">?</span>
+    <span class="info-icon" data-tip="DTE curve: margin @0DTE grows with days to expiry, and doubles on expiry day. Expiry 0DTE, other days ½: margin @0DTE on expiry day, half of it on every other day. Independent: type each weekday's margin directly. All per lot, × lots that day. Switching keeps every mode's numbers.">?</span>
   </h2>
   <div class="table-scroll">
   <table id="stratTable">
@@ -361,8 +366,8 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
         <th><span class="unit-label" data-tpl="max {u}/strat">max $/strat</span><span class="info-icon" data-tip="The most this strategy alone is allowed to use in margin on any single day. Leave blank for no limit.">?</span></th>
         <th class="dtecol show" style="text-align:left;">lots (m,t,w,t,f)<span class="info-icon" data-tip="Lots held each weekday, e.g. &quot;12111&quot; means 1 lot Monday, 2 Tuesday, 1 the rest of the week.">?</span></th>
         <th><span class="unit-label" data-tpl="current margin ({u})">current margin ($)</span><span class="info-icon" data-tip="What you actually have deployed today on this strategy's heaviest day. Just for comparison — the solver doesn't use this number.">?</span></th>
-        <th class="riskcol"><span id="expReturnLabel">exp. return</span><span class="info-icon" data-tip="Only used when the objective is &quot;Risk-adjusted return&quot;. Must be a dollar amount (not a %), for one full run of this strategy at scale 1 — over one week if horizon is Weekly, or the whole month if horizon is Monthly.">?</span></th>
-        <th class="riskcol"><span id="riskLabel">risk</span><span class="info-icon" data-tip="Only used when the objective is &quot;Risk-adjusted return&quot;. Same units and same period as expected return — a dollar risk (e.g. standard deviation of P&amp;L), not a %.">?</span></th>
+        <th class="riskcol"><span id="expReturnLabel">exp. return</span><span class="info-icon" data-tip="Dollar return the backtest earned with margin @0DTE deployed, over one horizon period. Only used by Risk-adjusted return.">?</span></th>
+        <th class="riskcol"><span id="riskLabel">risk</span><span class="info-icon" data-tip="Dollar risk (e.g. max drawdown) of that same backtest. Only used by Risk-adjusted return.">?</span></th>
         <th></th>
       </tr>
     </thead>
@@ -445,6 +450,59 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
   </div>
 </div>
 
+<div class="panel" id="perfPanel">
+  <h2>performance (optimal allocation)<span class="info-icon" data-tip="Each strategy's daily P&amp;L scaled by its allocated peak-day margin ÷ margin @0DTE, added up by date.">?</span></h2>
+  <div id="perfEmptyMsg" class="empty-state">Run "Solve MILP" above first.</div>
+  <div id="perfBody" style="display:none;">
+    <div class="perf-period" id="perfPeriod"></div>
+    <div class="perf-cards" id="perfCards"></div>
+    <div class="notice" id="perfNote" style="display:none;"></div>
+    <div class="setup-label" style="margin-top:18px;">Per strategy</div>
+    <div class="table-scroll">
+    <table>
+      <thead><tr>
+        <th style="text-align:left;">strategy</th>
+        <th>P&amp;L scale<span class="info-icon" data-tip="Allocated peak-day margin ÷ margin @0DTE (the margin the P&amp;L was earned on). Daily P&amp;L is multiplied by this.">?</span></th>
+        <th>total P&amp;L</th>
+        <th>share of P&amp;L<span class="info-icon" data-tip="This strategy's total P&amp;L ÷ the portfolio's.">?</span></th>
+        <th>Sharpe</th>
+        <th>Sortino</th>
+        <th>max drawdown</th>
+        <th>win rate</th>
+      </tr></thead>
+      <tbody id="perfStratBody"></tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="livePanel">
+  <h2>compare with live backtests<span class="info-icon" data-tip="Pick a folder of live backtests. Builds a downloadable report comparing them with the recommended book from the last solve.">?</span></h2>
+  <div class="calendar-fields">
+    <div>
+      <div class="field-row">
+        <label>Live folder<span class="info-icon" data-tip="The folder holding the backtests, e.g. current_live. Every consolidated_store CSV inside is read; your browser may ask you to confirm.">?</span></label>
+        <label class="upload-btn" style="margin:0;">⭱ choose folder<input type="file" id="liveFolder" webkitdirectory directory multiple></label>
+      </div>
+      <div class="field-row">
+        <label>USD/INR rate (₹ per $1)<span class="info-icon" data-tip="Live P&amp;L is in rupees; it is converted to dollars at this rate.">?</span></label>
+        <input type="number" id="liveUsdInr" autocomplete="off" value="95.2" step="0.1" min="0">
+      </div>
+    </div>
+  </div>
+  <div id="liveStatus" class="empty-state" style="margin-top:10px;">No live folder loaded yet.</div>
+  <div class="table-scroll" id="liveScalesWrap" style="display:none;max-width:760px;margin-top:10px;">
+  <table>
+    <thead><tr><th style="text-align:left;">live backtest</th><th>days</th><th>total P&amp;L</th><th>P&amp;L scale<span class="info-icon" data-tip="Multiplies this backtest's daily P&amp;L in the report. 0.5 halves it; 1 leaves it as is.">?</span></th></tr></thead>
+    <tbody id="liveScalesBody"></tbody>
+  </table>
+  </div>
+  <div class="table-actions" style="margin-top:10px;">
+    <button class="solve-btn" id="liveReportBtn">Download comparison report</button>
+    <span class="notice" id="liveReportMsg" style="margin:0;"></span>
+  </div>
+</div>
+
 <div class="panel">
   <h2>problem formulation<span class="info-icon" data-tip="The exact model sent to the solver, rebuilt from your inputs.">?</span></h2>
   <pre class="formulation" id="formulationBlock"></pre>
@@ -507,12 +565,403 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
 
 </div>
 
+<!-- Template for the "compare with live backtests" report. Raw text: <\/script> is
+     restored on export. __DATA__ is replaced with the report's JSON. -->
+<script type="text/plain" id="liveReportTpl">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Margin Desk vs Live</title>
+<style>
+:root{
+  color-scheme: light;
+  --page:#f9f9f7; --surface-1:#fcfcfb; --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
+  --gain:#2a78d6; --loss:#e34948; --gain-wash:rgba(42,120,214,0.10); --accent:#2a78d6;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --page:#0d0d0d; --surface-1:#1a1a19; --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+    --gain:#3987e5; --loss:#e66767; --gain-wash:rgba(57,135,229,0.12); --accent:#3987e5;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --page:#0d0d0d; --surface-1:#1a1a19; --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
+  --gain:#3987e5; --loss:#e66767; --gain-wash:rgba(57,135,229,0.12); --accent:#3987e5;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--page);color:var(--text-primary);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:14px;line-height:1.5;}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 16px 64px;}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;}
+h1{font-size:20px;margin:0 0 2px;font-weight:600;}
+.sub{color:var(--text-secondary);font-size:13px;margin:0;}
+.controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:8px;padding:2px;background:var(--surface-1);}
+.seg button{border:0;background:none;color:var(--text-secondary);font:inherit;font-size:13px;padding:5px 12px;border-radius:6px;cursor:pointer;}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff;}
+.tabgroup{margin-top:18px;}
+.tabgroup .gl{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:0 0 2px 2px;}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--grid);overflow-x:auto;}
+.tab{border:0;background:none;font:inherit;font-size:13px;color:var(--text-secondary);padding:8px 13px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;}
+.tab[aria-selected="true"]{color:var(--text-primary);border-bottom-color:var(--accent);font-weight:600;}
+main{margin-top:16px;}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:16px;}
+.tile{background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:12px 14px;}
+.tile .l{font-size:12px;color:var(--text-secondary);}
+.tile .v{font-size:20px;font-weight:600;margin-top:2px;}
+.card{background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:14px 16px 10px;margin-bottom:14px;}
+.card h2{font-size:14px;font-weight:600;margin:0;}
+.card .note{font-size:12px;color:var(--text-secondary);margin:2px 0 6px;}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--text-secondary);margin:4px 0 2px;}
+.legend span{display:inline-flex;align-items:center;gap:6px;}
+.key-line{width:16px;height:2px;border-radius:1px;display:inline-block;}
+.key-box{width:10px;height:10px;border-radius:2px;display:inline-block;}
+.chart{position:relative;width:100%;}
+.chart svg{display:block;width:100%;overflow:visible;}
+.grid line{stroke:var(--grid);stroke-width:1;}
+.axis text{fill:var(--text-muted);font-size:11px;font-variant-numeric:tabular-nums;}
+.baseline{stroke:var(--axis);stroke-width:1;}
+.endlabel{fill:var(--text-secondary);font-size:11px;}
+.bar.hot{opacity:.75;}
+.crosshair{stroke:var(--text-muted);stroke-width:1;}
+#tip{position:fixed;pointer-events:none;background:var(--surface-1);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.12);display:none;z-index:10;min-width:160px;}
+#tip .d{color:var(--text-secondary);margin-bottom:4px;}
+#tip .r{display:flex;align-items:center;gap:10px;justify-content:space-between;}
+#tip .r b{font-variant-numeric:tabular-nums;}
+#tip .r span{display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary);}
+details{margin-top:6px;}
+summary{cursor:pointer;color:var(--text-secondary);font-size:12px;padding:4px 0;}
+table{border-collapse:collapse;width:100%;font-size:12.5px;margin-top:6px;}
+th,td{padding:5px 9px;border-bottom:1px solid var(--grid);text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+th{color:var(--text-secondary);font-weight:600;}
+th:first-child,td:first-child{text-align:left;}
+.tablewrap{max-height:320px;overflow:auto;}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 24px;font-size:12.5px;margin-top:6px;}
+.kv div{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--grid);padding:4px 0;}
+.kv span:first-child{color:var(--text-secondary);}
+.kv span:last-child{font-variant-numeric:tabular-nums;text-align:right;}
+.scroll{overflow-x:auto;}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div>
+    <h1>Margin desk vs live backtests</h1>
+    <p class="sub" id="period"></p>
+  </div>
+  <div class="controls">
+    <div class="seg" role="group" aria-label="Currency">
+      <button id="curUSD" aria-pressed="true">$</button><button id="curINR" aria-pressed="false">₹</button>
+    </div>
+    <div class="seg" role="group" aria-label="Theme">
+      <button id="thLight" aria-pressed="false">Light</button><button id="thDark" aria-pressed="false">Dark</button>
+    </div>
+  </div>
+</header>
+<div id="tabgroups"></div>
+<main id="view"></main>
+<p class="sub" style="margin-top:18px;" id="method"></p>
+</div>
+<div id="tip" role="tooltip"></div>
+<script>
+const DATA = __DATA__;
+let currency = 'USD', active = 'compare';
+try{ const th = localStorage.getItem('mvl-theme'); if(th) document.documentElement.setAttribute('data-theme', th); }catch(e){}
+
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const conv = v => currency === 'INR' ? v * DATA.usdInr : v;          // data is in dollars
+const sym = () => currency === 'INR' ? '₹' : '$';
+function money(v, compact){
+  v = conv(v); const s = v < 0 ? '−' : ''; const a = Math.abs(v);
+  if(compact){
+    if(a >= 1e9) return s + sym() + (a/1e9).toFixed(2) + 'B';
+    if(a >= 1e6) return s + sym() + (a/1e6).toFixed(a >= 1e8 ? 0 : 2) + 'M';
+    if(a >= 1e3) return s + sym() + (a/1e3).toFixed(a >= 1e5 ? 0 : 1) + 'K';
+    return s + sym() + a.toFixed(0);
+  }
+  return s + sym() + Math.round(a).toLocaleString('en-US');
+}
+const pct = v => v === null ? '—' : (v * 100).toFixed(1) + '%';
+const ratio = v => v === null ? '—' : v.toFixed(2);
+const fmtDate = d => new Date(d + 'T00:00:00').toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+const fmtMonth = m => new Date(m + '-01T00:00:00').toLocaleDateString('en-GB', { month:'short', year:'numeric' });
+
+// ---- aligned books ---------------------------------------------------------
+// Every book is laid on the union of all dates; a missing date counts as 0.
+const DATES = [...new Set([...DATA.live.dates, ...DATA.dash.dates])].sort();
+function align(dates, vals){ const m = new Map(dates.map((d, i) => [d, vals[i]])); return DATES.map(d => m.get(d) || 0); }
+const BOOKS = {};
+BOOKS['live:combined'] = { group: 'Live', label: 'Live combined', vals: align(DATA.live.dates, DATA.live.combined) };
+Object.entries(DATA.live.series).forEach(([n, v]) => { BOOKS['live:' + n] = { group: 'Live', label: n, vals: align(DATA.live.dates, v) }; });
+BOOKS['dash:combined'] = { group: 'Dashboard', label: 'Recommended combined', vals: align(DATA.dash.dates, DATA.dash.combined) };
+Object.entries(DATA.dash.series).forEach(([n, v]) => { BOOKS['dash:' + n] = { group: 'Dashboard', label: n, vals: align(DATA.dash.dates, v) }; });
+
+// ---- metrics (same definitions as the dashboard's performance section) -----
+function metrics(values){
+  const cap = DATA.capital, n = values.length, total = values.reduce((a, b) => a + b, 0), mean = n ? total / n : 0;
+  const std = n > 1 ? Math.sqrt(values.reduce((a, v) => a + (v - mean) ** 2, 0) / (n - 1)) : 0;
+  const down = n ? Math.sqrt(values.reduce((a, v) => a + Math.min(v, 0) ** 2, 0) / n) : 0;
+  let cum = 0, peak = 0, dd = 0; values.forEach(v => { cum += v; peak = Math.max(peak, cum); dd = Math.max(dd, peak - cum); });
+  const act = values.filter(v => v !== 0);
+  return { days: act.length, total, roc: cap > 0 ? total / cap : null, annual: cap > 0 && n ? total / cap * 252 / n : null,
+    sharpe: std > 0 ? mean / std * Math.sqrt(252) : null, sortino: down > 0 ? mean / down * Math.sqrt(252) : null,
+    maxDD: dd, maxDDPct: cap > 0 ? dd / cap : null, calmar: dd > 0 && n ? (total * 252 / n) / dd : null,
+    win: act.length ? act.filter(v => v > 0).length / act.length : null,
+    best: n ? Math.max(...values) : null, worst: n ? Math.min(...values) : null };
+}
+function weekStart(d){ const t = new Date(d + 'T00:00:00'); t.setDate(t.getDate() - (t.getDay() + 6) % 7);
+  return t.getFullYear() + '-' + String(t.getMonth()+1).padStart(2,'0') + '-' + String(t.getDate()).padStart(2,'0'); }
+function group(vals, keyFn){ const m = new Map(); DATES.forEach((d, i) => { const k = keyFn(d); m.set(k, (m.get(k) || 0) + vals[i]); }); return [...m.entries()]; }
+const equity = vals => { let c = 0; return vals.map(v => c += v); };
+
+// ---- tooltip ---------------------------------------------------------------
+const tip = document.getElementById('tip');
+function showTip(ev, title, rows){
+  tip.replaceChildren();
+  const d = document.createElement('div'); d.className = 'd'; d.textContent = title; tip.appendChild(d);
+  rows.forEach(r => { const row = document.createElement('div'); row.className = 'r'; const lab = document.createElement('span');
+    if(r.color){ const k = document.createElement('i'); k.className = 'key-line'; k.style.background = r.color; lab.appendChild(k); }
+    lab.appendChild(document.createTextNode(r.label)); const val = document.createElement('b'); val.textContent = r.value;
+    row.append(lab, val); tip.appendChild(row); });
+  tip.style.display = 'block';
+  const w = tip.offsetWidth, h = tip.offsetHeight; let x = ev.clientX + 14, y = ev.clientY + 14;
+  if(x + w > innerWidth - 8) x = ev.clientX - w - 14; if(y + h > innerHeight - 8) y = ev.clientY - h - 14;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+const hideTip = () => { tip.style.display = 'none'; };
+
+// ---- chart primitives --------------------------------------------------------
+function niceTicks(min, max, n = 6){
+  if(min === max){ min -= 1; max += 1; }
+  const raw = (max - min) / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= raw);
+  const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step, t = [];
+  for(let v = lo; v <= hi + step / 2; v += step) t.push(+v.toFixed(10));
+  return t;
+}
+const NS = 'http://www.w3.org/2000/svg';
+function el(tag, attrs, parent){ const e = document.createElementNS(NS, tag); for(const k in attrs) e.setAttribute(k, attrs[k]); if(parent) parent.appendChild(e); return e; }
+function frame(box, height, yMin, yMax){
+  box.replaceChildren();
+  const W = Math.max(320, box.clientWidth), H = height, m = { l: 64, r: 110, t: 10, b: 26 };
+  const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img' }, box);
+  const ticks = niceTicks(conv(yMin), conv(yMax)), y0 = ticks[0], y1 = ticks[ticks.length - 1];
+  const Y = v => m.t + (1 - (conv(v) - y0) / (y1 - y0)) * (H - m.t - m.b);
+  const g = el('g', { class: 'grid' }, svg), ax = el('g', { class: 'axis' }, svg);
+  ticks.forEach(t => { const yy = m.t + (1 - (t - y0) / (y1 - y0)) * (H - m.t - m.b);
+    el('line', { x1: m.l, x2: W - m.r, y1: yy, y2: yy }, g);
+    const tx = el('text', { x: m.l - 8, y: yy + 4, 'text-anchor': 'end' }, ax);
+    tx.textContent = money(currency === 'INR' ? t / DATA.usdInr : t, true); });
+  return { svg, W, H, m, Y, ax };
+}
+function monthTicks(f, X){
+  let last = '';
+  DATES.forEach((d, i) => { const mo = d.slice(0, 7); if(mo !== last){ last = mo;
+    const t = el('text', { x: X(i), y: f.H - 8, 'text-anchor': 'middle' }, f.ax); t.textContent = fmtMonth(mo).split(' ')[0]; } });
+}
+function lineChart(box, lines, opts = {}){
+  const all = lines.flatMap(l => l.values).concat([0]);
+  const f = frame(box, opts.height || 260, Math.min(...all), Math.max(...all));
+  const n = DATES.length, X = i => f.m.l + i / Math.max(1, n - 1) * (f.W - f.m.l - f.m.r);
+  el('line', { class: 'baseline', x1: f.m.l, x2: f.W - f.m.r, y1: f.Y(0), y2: f.Y(0) }, f.svg);
+  monthTicks(f, X);
+  lines.forEach(l => {
+    const pts = l.values.map((v, i) => `${X(i).toFixed(1)},${f.Y(v).toFixed(1)}`);
+    if(lines.length === 1) el('path', { d: `M${X(0)},${f.Y(0)} L${pts.join(' L')} L${X(n - 1)},${f.Y(0)} Z`, fill: 'var(--gain-wash)' }, f.svg);
+    el('polyline', { points: pts.join(' '), fill: 'none', stroke: l.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, f.svg);
+    l._ex = X(n - 1); l._ey = f.Y(l.values[n - 1]);
+    el('circle', { cx: l._ex, cy: l._ey, r: 4, fill: l.color, stroke: 'var(--surface-1)', 'stroke-width': 2 }, f.svg);
+  });
+  const labs = lines.map(l => ({ l, y: l._ey })).sort((a, b) => a.y - b.y);
+  for(let i = 1; i < labs.length; i++) if(labs[i].y - labs[i - 1].y < 13) labs[i].y = labs[i - 1].y + 13;
+  labs.forEach(o => {
+    if(Math.abs(o.y - o.l._ey) > 1) el('line', { x1: o.l._ex + 5, y1: o.l._ey, x2: o.l._ex + 10, y2: o.y, stroke: 'var(--axis)' }, f.svg);
+    const t = el('text', { class: 'endlabel', x: o.l._ex + 12, y: o.y + 4 }, f.svg);
+    t.textContent = (lines.length > 1 ? o.l.short + ' ' : '') + money(o.l.values[o.l.values.length - 1], true);
+  });
+  const cross = el('line', { class: 'crosshair', y1: f.m.t, y2: f.H - f.m.b, visibility: 'hidden' }, f.svg);
+  const dots = lines.map(l => el('circle', { r: 4, fill: l.color, stroke: 'var(--surface-1)', 'stroke-width': 2, visibility: 'hidden' }, f.svg));
+  const hit = el('rect', { x: f.m.l, y: f.m.t, width: f.W - f.m.l - f.m.r, height: f.H - f.m.t - f.m.b, fill: 'transparent' }, f.svg);
+  hit.addEventListener('pointermove', ev => {
+    const r = f.svg.getBoundingClientRect(), sx = (ev.clientX - r.left) * f.W / r.width;
+    const i = Math.max(0, Math.min(n - 1, Math.round((sx - f.m.l) / (f.W - f.m.l - f.m.r) * (n - 1))));
+    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.setAttribute('visibility', 'visible');
+    lines.forEach((l, k) => { dots[k].setAttribute('cx', X(i)); dots[k].setAttribute('cy', f.Y(l.values[i])); dots[k].setAttribute('visibility', 'visible'); });
+    showTip(ev, fmtDate(DATES[i]) + ' ' + DATES[i].slice(0, 4), lines.map(l => ({ label: l.name, value: money(l.values[i]), color: l.color })));
+  });
+  hit.addEventListener('pointerleave', () => { cross.setAttribute('visibility', 'hidden'); dots.forEach(d => d.setAttribute('visibility', 'hidden')); hideTip(); });
+}
+function roundedBar(x, bw, y, y0){
+  const up = y <= y0, h = Math.abs(y - y0), r = Math.min(4, bw / 2, h), top = up ? y : y0, bot = up ? y0 : y;
+  if(h < 0.5) return `M${x},${y0} h${bw}`;
+  return up
+    ? `M${x},${bot} L${x},${top + r} Q${x},${top} ${x + r},${top} L${x + bw - r},${top} Q${x + bw},${top} ${x + bw},${top + r} L${x + bw},${bot} Z`
+    : `M${x},${top} L${x},${bot - r} Q${x},${bot} ${x + r},${bot} L${x + bw - r},${bot} Q${x + bw},${bot} ${x + bw},${bot - r} L${x + bw},${top} Z`;
+}
+// series: [{name, color, values}] — one series uses gain/loss colours, several are grouped side by side
+function barChart(box, labels, series, opts = {}){
+  const all = series.flatMap(s => s.values).concat([0]);
+  const f = frame(box, opts.height || 220, Math.min(...all), Math.max(...all));
+  const n = labels.length, band = (f.W - f.m.l - f.m.r) / n, k = series.length;
+  // grouped bars sit together, 2px apart, centred in their band
+  const gap = k > 1 ? 2 : 0, bw = Math.max(1, Math.min(24, (band - 2 - gap * (k - 1)) / k)), y0 = f.Y(0);
+  const groupW = k * bw + gap * (k - 1);
+  labels.forEach((lab, i) => {
+    const marks = series.map((s, j) => {
+      const x = f.m.l + i * band + (band - groupW) / 2 + j * (bw + gap), v = s.values[i];
+      const fill = k === 1 ? (v >= 0 ? 'var(--gain)' : 'var(--loss)') : s.color;
+      return el('path', { class: 'bar', d: roundedBar(x, bw, f.Y(v), y0), fill }, f.svg);
+    });
+    const hit = el('rect', { x: f.m.l + i * band, y: f.m.t, width: band, height: f.H - f.m.t - f.m.b, fill: 'transparent' }, f.svg);
+    hit.addEventListener('pointermove', ev => { marks.forEach(m => m.classList.add('hot'));
+      showTip(ev, lab.title, series.map(s => ({ label: s.name, value: money(s.values[i]), color: k > 1 ? s.color : null }))); });
+    hit.addEventListener('pointerleave', () => { marks.forEach(m => m.classList.remove('hot')); hideTip(); });
+    if(opts.labelEvery && i % opts.labelEvery === 0){ const t = el('text', { x: f.m.l + i * band + band / 2, y: f.H - 8, 'text-anchor': 'middle' }, f.ax); t.textContent = lab.tick; }
+  });
+  el('line', { class: 'baseline', x1: f.m.l, x2: f.W - f.m.r, y1: y0, y2: y0 }, f.svg);
+  if(opts.monthAxis) monthTicks(f, i => f.m.l + i * band + band / 2);
+}
+
+// ---- DOM helpers -------------------------------------------------------------
+function card(parent, title, note){ const c = document.createElement('section'); c.className = 'card';
+  const h = document.createElement('h2'); h.textContent = title; c.appendChild(h);
+  if(note){ const p = document.createElement('p'); p.className = 'note'; p.textContent = note; c.appendChild(p); }
+  parent.appendChild(c); return c; }
+function chartBox(c){ const b = document.createElement('div'); b.className = 'chart'; c.appendChild(b); return b; }
+function legend(c, items, kind){ const lg = document.createElement('div'); lg.className = 'legend';
+  items.forEach(it => { const s = document.createElement('span'); const k = document.createElement('i'); k.className = kind === 'box' ? 'key-box' : 'key-line'; k.style.background = it.color; s.append(k, document.createTextNode(it.name)); lg.appendChild(s); });
+  c.appendChild(lg); }
+function table(parent, headers, body, collapsed){
+  const t = document.createElement('table'); const tr = document.createElement('tr');
+  headers.forEach(h => { const th = document.createElement('th'); th.textContent = h; tr.appendChild(th); }); t.appendChild(tr);
+  body.forEach(r => { const row = document.createElement('tr'); r.forEach(v => { const td = document.createElement('td'); td.textContent = v; row.appendChild(td); }); t.appendChild(row); });
+  if(!collapsed){ const w = document.createElement('div'); w.className = 'scroll'; w.appendChild(t); parent.appendChild(w); return; }
+  const d = document.createElement('details'); const s = document.createElement('summary'); s.textContent = 'Show table'; d.appendChild(s);
+  const w = document.createElement('div'); w.className = 'tablewrap'; w.appendChild(t); d.appendChild(w); parent.appendChild(d);
+}
+function tiles(parent, items){ const t = document.createElement('div'); t.className = 'tiles';
+  items.forEach(([l, v]) => { const d = document.createElement('div'); d.className = 'tile';
+    const a = document.createElement('div'); a.className = 'l'; a.textContent = l; const b = document.createElement('div'); b.className = 'v'; b.textContent = v;
+    d.append(a, b); t.appendChild(d); }); parent.appendChild(t); }
+
+// ---- views -------------------------------------------------------------------
+let draws = [];
+function renderCompare(view){
+  const L = BOOKS['live:combined'].vals, D = BOOKS['dash:combined'].vals, mL = metrics(L), mD = metrics(D);
+  const cfg = card(view, 'Dashboard configuration behind the recommended book', DATA.generatedNote);
+  const kv = document.createElement('div'); kv.className = 'kv';
+  DATA.config.forEach(([k, v]) => { const r = document.createElement('div'); const a = document.createElement('span'); a.textContent = k; const b = document.createElement('span'); b.textContent = v; r.append(a, b); kv.appendChild(r); });
+  cfg.appendChild(kv);
+  table(cfg, DATA.strategiesTable.headers, DATA.strategiesTable.rows, true);
+
+  const mc = card(view, 'Metrics side by side', `Annualised on 252 trading days, risk-free 0. % figures are against the dashboard's total capital (${money(DATA.capital)}), for both books.`);
+  const rows = [
+    ['Total P&L', m => money(m.total)], ['Return on capital', m => pct(m.roc)], ['Annualised return', m => pct(m.annual)],
+    ['Sharpe', m => ratio(m.sharpe)], ['Sortino', m => ratio(m.sortino)], ['Max drawdown', m => money(m.maxDD)],
+    ['Max drawdown % of capital', m => pct(m.maxDDPct)], ['Calmar', m => ratio(m.calmar)], ['Win rate', m => pct(m.win)],
+    ['Best day', m => money(m.best)], ['Worst day', m => money(m.worst)], ['Days with P&L', m => String(m.days)]];
+  table(mc, ['', 'Live combined', 'Recommended (dashboard)'], rows.map(([k, f]) => [k, f(mL), f(mD)]));
+
+  const series = [{ name: 'Live combined', short: 'Live', color: css('--s1'), values: equity(L) },
+                  { name: 'Recommended', short: 'Recommended', color: css('--s2'), values: equity(D) }];
+  const c1 = card(view, 'Equity curves', 'Cumulative P&L.'); legend(c1, series, 'line'); const b1 = chartBox(c1);
+  draws.push(() => lineChart(b1, series.map((s, i) => Object.assign(s, { color: css(i ? '--s2' : '--s1') })), { height: 300 }));
+
+  const bars = (title, keyFn, labelFn, opts) => {
+    const gl = group(L, keyFn), gd = group(D, keyFn);
+    const c = card(view, title, opts.note || null);
+    const sers = [{ name: 'Live combined', color: css('--s1'), values: gl.map(e => e[1]) }, { name: 'Recommended', color: css('--s2'), values: gd.map(e => e[1]) }];
+    legend(c, sers, 'box'); const b = chartBox(c);
+    draws.push(() => barChart(b, gl.map(([k]) => labelFn(k)), sers.map((s, i) => Object.assign(s, { color: css(i ? '--s2' : '--s1') })), opts));
+    table(c, [opts.col, 'Live combined', 'Recommended', 'Difference'], gl.map(([k, v], i) => [labelFn(k).title, money(v), money(gd[i][1]), money(gd[i][1] - v)]), true);
+  };
+  bars('Daily P&L', d => d, d => ({ title: fmtDate(d) + ' ' + d.slice(0, 4) }), { monthAxis: true, col: 'Date' });
+  bars('Weekly P&L', weekStart, w => ({ title: 'Week of ' + fmtDate(w) + ' ' + w.slice(0, 4), tick: fmtDate(w) }), { labelEvery: 4, col: 'Week of', note: 'Monday–Friday weeks, labelled by the Monday.' });
+  bars('Monthly P&L', d => d.slice(0, 7), m => ({ title: fmtMonth(m), tick: fmtMonth(m) }), { labelEvery: 1, height: 200, col: 'Month' });
+}
+function renderBook(view, key){
+  const book = BOOKS[key], vals = book.vals, m = metrics(vals), eq = equity(vals);
+  tiles(view, [['Total P&L', money(m.total, true)], ['Return on capital', pct(m.roc)], ['Sharpe', ratio(m.sharpe)], ['Sortino', ratio(m.sortino)],
+               ['Max drawdown', money(-m.maxDD, true)], ['Win rate', pct(m.win)]]);
+  if(key === 'live:combined' || key === 'dash:combined'){
+    const pre = key.split(':')[0] + ':';
+    const names = Object.keys(BOOKS).filter(k => k.startsWith(pre) && k !== key);
+    const c0 = card(view, 'Equity curves compared', 'Cumulative P&L of each ' + (pre === 'live:' ? 'backtest.' : 'strategy at its solved size.'));
+    const slots = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8'];
+    const lines = names.slice(0, 8).map((k, i) => ({ name: BOOKS[k].label, short: BOOKS[k].label.split(' ').slice(0, 2).join(' '), values: equity(BOOKS[k].vals), slot: slots[i] }));
+    legend(c0, lines.map(l => ({ name: l.name, color: css(l.slot) })), 'line'); const b0 = chartBox(c0);
+    draws.push(() => lineChart(b0, lines.map(l => Object.assign(l, { color: css(l.slot) })), { height: 300 }));
+  }
+  const c1 = card(view, 'Equity curve', 'Cumulative P&L.'); const b1 = chartBox(c1);
+  draws.push(() => lineChart(b1, [{ name: 'Cumulative P&L', values: eq, color: css('--gain') }]));
+  const gl = [{ name: 'Gain', color: css('--gain') }, { name: 'Loss', color: css('--loss') }];
+  const c2 = card(view, 'Daily P&L', null); legend(c2, gl, 'box'); const b2 = chartBox(c2);
+  draws.push(() => barChart(b2, DATES.map(d => ({ title: fmtDate(d) + ' ' + d.slice(0, 4) })), [{ name: 'P&L', values: vals }], { monthAxis: true }));
+  const weeks = group(vals, weekStart);
+  const c3 = card(view, 'Weekly P&L', 'Monday–Friday weeks, labelled by the Monday.'); legend(c3, gl, 'box'); const b3 = chartBox(c3);
+  draws.push(() => barChart(b3, weeks.map(([w]) => ({ title: 'Week of ' + fmtDate(w) + ' ' + w.slice(0, 4), tick: fmtDate(w) })), [{ name: 'P&L', values: weeks.map(e => e[1]) }], { labelEvery: 4 }));
+  const months = group(vals, d => d.slice(0, 7));
+  const c4 = card(view, 'Monthly P&L', null); legend(c4, gl, 'box'); const b4 = chartBox(c4);
+  draws.push(() => barChart(b4, months.map(([mo]) => ({ title: fmtMonth(mo), tick: fmtMonth(mo) })), [{ name: 'P&L', values: months.map(e => e[1]) }], { labelEvery: 1, height: 200 }));
+  table(c2, ['Date', 'P&L', 'Cumulative'], DATES.map((d, i) => [d, money(vals[i]), money(eq[i])]), true);
+  table(c3, ['Week of', 'P&L'], weeks.map(([w, v]) => [w, money(v)]), true);
+  table(c4, ['Month', 'P&L'], months.map(([mo, v]) => [fmtMonth(mo), money(v)]), true);
+}
+function render(){
+  const view = document.getElementById('view'); view.replaceChildren(); hideTip(); draws = [];
+  if(active === 'compare') renderCompare(view); else renderBook(view, active);
+  draws.forEach(f => f());
+}
+function buildTabs(){
+  const host = document.getElementById('tabgroups');
+  const groups = [['Comparison', [['compare', 'Live vs recommended']]],
+    ['Live backtests', Object.keys(BOOKS).filter(k => k.startsWith('live:')).map(k => [k, BOOKS[k].label])],
+    ['Dashboard recommendation', Object.keys(BOOKS).filter(k => k.startsWith('dash:')).map(k => [k, BOOKS[k].label])]];
+  groups.forEach(([gname, tabs]) => {
+    const g = document.createElement('div'); g.className = 'tabgroup';
+    const l = document.createElement('div'); l.className = 'gl'; l.textContent = gname; g.appendChild(l);
+    const bar = document.createElement('nav'); bar.className = 'tabs'; bar.setAttribute('role', 'tablist');
+    tabs.forEach(([k, label]) => { const b = document.createElement('button'); b.className = 'tab'; b.setAttribute('role', 'tab'); b.textContent = label; b.dataset.key = k;
+      b.setAttribute('aria-selected', String(k === active));
+      b.addEventListener('click', () => { active = k; host.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.key === k))); render(); });
+      bar.appendChild(b); });
+    g.appendChild(bar); host.appendChild(g);
+  });
+}
+function setCurrency(c){ currency = c; document.getElementById('curUSD').setAttribute('aria-pressed', String(c === 'USD')); document.getElementById('curINR').setAttribute('aria-pressed', String(c === 'INR')); render(); }
+function setTheme(t){ document.documentElement.setAttribute('data-theme', t); try{ localStorage.setItem('mvl-theme', t); }catch(e){}
+  document.getElementById('thLight').setAttribute('aria-pressed', String(t === 'light')); document.getElementById('thDark').setAttribute('aria-pressed', String(t === 'dark')); render(); }
+document.getElementById('curUSD').onclick = () => setCurrency('USD');
+document.getElementById('curINR').onclick = () => setCurrency('INR');
+document.getElementById('thLight').onclick = () => setTheme('light');
+document.getElementById('thDark').onclick = () => setTheme('dark');
+document.getElementById('period').textContent = DATES[0] + ' → ' + DATES[DATES.length - 1] + ' · ' + DATES.length + ' dates · live folder: ' + DATA.liveFolder + ' · generated ' + DATA.generated;
+document.getElementById('method').textContent = 'Live: daily P&L = last portfolio_value of the day − last portfolio_value of the previous trading day, from each backtest\'s consolidated_store, converted to dollars at ₹' + DATA.usdInr + ' per $1, and multiplied by any P&L scale shown in the configuration. Recommended: each strategy\'s daily_pnl × (allocated peak-day margin ÷ margin @0DTE), as in the dashboard\'s performance section. All books are laid on the union of dates; a book with no figure for a date counts as 0 that day.';
+const th = document.documentElement.getAttribute('data-theme');
+if(th){ document.getElementById('thLight').setAttribute('aria-pressed', String(th === 'light')); document.getElementById('thDark').setAttribute('aria-pressed', String(th === 'dark')); }
+buildTabs(); render();
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => draws.forEach(f => f()), 120); });
+<\/script>
+</body>
+</html>
+
+</script>
 <script>
 const WEEKDAYS = ['mon','tue','wed','thu','fri'];
 
 const DEFAULTS = {
   horizon: 'weekly',
-  marginInputMode: 'dte', // 'dte' | 'independent'
+  marginInputMode: 'dte', // 'dte' | 'half' | 'independent'
   objective: 'total',
   strategies: [],
   totalCapital: 10000000,
@@ -527,7 +976,10 @@ const DEFAULTS = {
   offsetC: 1,
   exponent: 0.5,
   sizingRef: {}, // 'NF|weekly' -> { lots, intervalSec, margin }: reference for the lots & trade interval section
-  sizingRows: ['NF|weekly','NF|monthly','BN|weekly','BN|monthly','SN|weekly','SN|monthly'] // reference rows shown
+  sizingRows: ['NF|weekly','NF|monthly','BN|weekly','BN|monthly','SN|weekly','SN|monthly'], // reference rows shown
+  liveUsdInr: 95.2,  // rupees per $1 for the live-comparison report
+  liveBook: null,    // { folder, backtests: { name: { 'YYYY-MM-DD': daily P&L in rupees } } }
+  liveScales: {}     // { backtest name: multiplier on its daily P&L } — 1 when absent
 };
 let state = JSON.parse(JSON.stringify(DEFAULTS));
 let lastOptimalScales = null; // per-strategy scale factors from the last successful solve; invalidated on any edit
@@ -678,6 +1130,13 @@ function unitMargin(strat, slot){
     // Only a monthly strategy's once-a-month expiry spike — which one row of
     // five weekday figures cannot express — is applied below.
     if(strat.type !== 'monthly') return raw;
+  }else if(state.marginInputMode === 'half'){
+    // margin @0DTE (x) is the actual expiry-day margin; every other weekday is x/2,
+    // flat — no dependence on days to expiry. Built as x/2 so the expiry rule below
+    // brings the expiry day back to x (monthly: only in the monthly expiry week).
+    const lots = lotsForWeekday(strat, wd);
+    if(lots === 0) return 0;
+    raw = num(strat.margin0DTE) / 2 * lots;
   }else{
     const lots = lotsForWeekday(strat, wd);
     if(lots === 0) return 0;
@@ -694,6 +1153,15 @@ function unitMargin(strat, slot){
 }
 // the dollar margin this strategy would need on its heaviest slot, at scale = 1
 // (used to translate a $-denominated "current margin" figure into an internal scale factor)
+// expected_return, risk and daily_pnl were earned with margin @0DTE actually deployed.
+// One dial ties up the strategy's peak-day margin, which can differ (e.g. x/2 for a
+// strategy never open on expiry day). Return and risk per dial scale by this factor —
+// the same factor the performance section uses for P&L. 1 when it can't be measured.
+function marginFactor(strat){
+  const peak = Math.max(0, ...getSlots().map(sl => unitMargin(strat, sl)));
+  const m0 = num(strat.margin0DTE);
+  return (peak > 0 && m0 > 0) ? peak / m0 : 1;
+}
 function peakUnitMargin(strat){
   const vals = getSlots().map(sl=>unitMargin(strat, sl));
   return Math.max(...vals, 0.0001);
@@ -758,17 +1226,16 @@ document.getElementById('objTotalBtn').addEventListener('click', ()=>{ state.obj
 document.getElementById('objMaximinBtn').addEventListener('click', ()=>{ state.objective='maximin'; saveState(); refreshObjectiveUI(); renderFormulation(); });
 document.getElementById('objRiskBtn').addEventListener('click', ()=>{ state.objective='riskadj'; saveState(); refreshObjectiveUI(); render(); renderFormulation(); });
 
-document.getElementById('marginModeDteBtn').addEventListener('click', ()=>{
-  state.marginInputMode = 'dte'; saveState();
-  document.getElementById('marginModeDteBtn').classList.add('active');
-  document.getElementById('marginModeIndepBtn').classList.remove('active');
-  render(); renderFormulation();
-});
-document.getElementById('marginModeIndepBtn').addEventListener('click', ()=>{
-  state.marginInputMode = 'independent'; saveState();
-  document.getElementById('marginModeIndepBtn').classList.add('active');
-  document.getElementById('marginModeDteBtn').classList.remove('active');
-  render(); renderFormulation();
+const MARGIN_MODE_BTNS = { dte: 'marginModeDteBtn', half: 'marginModeHalfBtn', independent: 'marginModeIndepBtn' };
+function refreshMarginModeButtons(){
+  Object.entries(MARGIN_MODE_BTNS).forEach(([mode, id]) => document.getElementById(id).classList.toggle('active', state.marginInputMode === mode));
+}
+Object.entries(MARGIN_MODE_BTNS).forEach(([mode, id]) => {
+  document.getElementById(id).addEventListener('click', () => {
+    state.marginInputMode = mode; saveState();
+    refreshMarginModeButtons();
+    render(); renderFormulation();
+  });
 });
 
 ['totalCapital','nfExpiry','bnExpiry','snExpiry','monthlyExpiryWeek','riskLambda','capNF','capBN','capSN','minNF','minBN','minSN','minTotalMargin','offsetC','exponent'].forEach(id=>{
@@ -778,7 +1245,7 @@ document.getElementById('marginModeIndepBtn').addEventListener('click', ()=>{
 // ---------- STRATEGY TABLE ----------
 function render(){
   // Header columns must follow the margin-input mode, same as the body cells below.
-  document.querySelectorAll('#stratTable thead .dtecol').forEach(th => th.classList.toggle('show', state.marginInputMode === 'dte'));
+  document.querySelectorAll('#stratTable thead .dtecol').forEach(th => th.classList.toggle('show', state.marginInputMode !== 'independent')); // dte + half
   document.querySelectorAll('#stratTable thead .indepcol').forEach(th => th.classList.toggle('show', state.marginInputMode === 'independent'));
   document.querySelectorAll('#stratTable .unit-label').forEach(el => { el.textContent = el.dataset.tpl.replace('{u}', unitSym()); });
   const moneyStep = def => displayUnit === 'millions' ? 'any' : def;
@@ -826,13 +1293,13 @@ function render(){
     maxMInput.addEventListener('input', e=>{ strat.maxMarginPerStrategy = fromDisplay(nonNegativeInput(e.target, 'Max $/strat')); saveState(); renderFormulation(); });
     tdMaxM.appendChild(maxMInput);
 
-    const tdLots = document.createElement('td'); tdLots.className='dtecol'; if(state.marginInputMode==='dte') tdLots.classList.add('show'); tdLots.style.textAlign='left';
+    const tdLots = document.createElement('td'); tdLots.className='dtecol'; if(state.marginInputMode!=='independent') tdLots.classList.add('show'); tdLots.style.textAlign='left';
     const lotsInput = document.createElement('input'); lotsInput.className='cell'; lotsInput.dataset.field='lotString'; lotsInput.style.width='90px'; lotsInput.type='text'; lotsInput.maxLength=5; lotsInput.placeholder='12111';
     lotsInput.value = strat.lotString || '';
     lotsInput.addEventListener('input', e=>{ strat.lotString = e.target.value.replace(/[^0-9]/g,'').slice(0,5); e.target.value = strat.lotString; saveState(); renderTotals(); renderFormulation(); });
     tdLots.appendChild(lotsInput);
 
-    const tdM0 = document.createElement('td'); tdM0.className='dtecol'; if(state.marginInputMode==='dte') tdM0.classList.add('show');
+    const tdM0 = document.createElement('td'); tdM0.className='dtecol'; if(state.marginInputMode!=='independent') tdM0.classList.add('show');
     const m0Input = document.createElement('input'); m0Input.className='units-cell'; m0Input.dataset.field='margin0DTE'; m0Input.style.width='76px'; m0Input.type='number'; m0Input.min='0'; m0Input.step=moneyStep('100');
     m0Input.value = toDisplay(strat.margin0DTE);
     m0Input.addEventListener('input', e=>{ strat.margin0DTE = fromDisplay(nonNegativeInput(e.target, 'Margin @0DTE')); saveState(); renderTotals(); renderFormulation(); });
@@ -889,7 +1356,278 @@ function renderTotals(){
   const cap = num(document.getElementById('totalCapital').value);
   renderWeekTypeReport(cap);
   renderSizing();
+  renderPerformance();
+  renderLive();
 }
+
+// ---------- PERFORMANCE (optimal allocation) ----------
+// Each strategy's daily_pnl is the P&L earned with margin @0DTE deployed (e.g. $6M).
+// It is scaled by (allocated peak-day margin ÷ margin @0DTE) — NOT by the solver's
+// dial, whose dial = 1 means margin @0DTE run through the DTE curve (e.g. $6M × √5
+// on a 4-DTE day). Scaled series are added up by date; the metrics come from that.
+// Annualised on 252 trading days, risk-free rate 0, % figures against total capital.
+function pnlMetrics(values, cap){
+  const n = values.length;
+  const total = values.reduce((a,b)=>a+b, 0);
+  const mean = n ? total/n : 0;
+  const std = n > 1 ? Math.sqrt(values.reduce((a,v)=>a+(v-mean)*(v-mean), 0)/(n-1)) : 0;
+  const downside = n ? Math.sqrt(values.reduce((a,v)=>a+Math.min(v,0)*Math.min(v,0), 0)/n) : 0;
+  let cum = 0, peak = 0, maxDD = 0;
+  values.forEach(v => { cum += v; peak = Math.max(peak, cum); maxDD = Math.max(maxDD, peak - cum); });
+  const active = values.filter(v => v !== 0);
+  return {
+    days: n, total,
+    roc: cap > 0 ? total/cap : null,
+    annual: cap > 0 && n ? (total/cap) * 252/n : null,
+    sharpe: std > 0 ? mean/std * Math.sqrt(252) : null,
+    sortino: downside > 0 ? mean/downside * Math.sqrt(252) : null,
+    maxDD, maxDDPct: cap > 0 ? maxDD/cap : null,
+    calmar: maxDD > 0 && n ? (total*252/n)/maxDD : null,
+    winRate: active.length ? active.filter(v=>v>0).length/active.length : null,
+    best: n ? Math.max(...values) : null, worst: n ? Math.min(...values) : null
+  };
+}
+
+// P&L multiplier for strategy i in the last solve: margin the allocation actually ties
+// up on its heaviest day, relative to the margin the daily_pnl was earned on.
+// Shared by the performance section and the live-comparison report.
+function pnlScaleOf(strat, i){
+  const dial = lastOptimalScales ? (lastOptimalScales[i] || 0) : 0;
+  return num(strat.margin0DTE) > 0 ? dial * peakUnitMargin(strat) / num(strat.margin0DTE) : 0;
+}
+function renderPerformance(){
+  const emptyMsg = document.getElementById('perfEmptyMsg');
+  const body = document.getElementById('perfBody');
+  const withPnl = state.strategies.filter(s => s.dailyPnl && Object.keys(s.dailyPnl).length);
+  let why = '';
+  if(!state.strategies.length) why = 'No strategies yet — add some on the table above.';
+  else if(!withPnl.length) why = 'No daily P&L data — upload a file with a daily_pnl column.';
+  else if(!lastOptimalScales) why = 'Run "Solve MILP" above first.';
+  emptyMsg.style.display = why ? 'block' : 'none';
+  emptyMsg.textContent = why;
+  body.style.display = why ? 'none' : 'block';
+  if(why) return;
+
+  const cap = num(document.getElementById('totalCapital').value);
+  const dates = [...new Set(withPnl.flatMap(s => Object.keys(s.dailyPnl)))].sort();
+  const dialOf = i => lastOptimalScales[i] || 0;
+  const pnlScale = pnlScaleOf;
+  const scaled = (s, i) => dates.map(d => pnlScale(s, i) * (s.dailyPnl && s.dailyPnl[d] || 0)); // missing day = 0
+  const portfolio = dates.map(() => 0);
+  state.strategies.forEach((s, i) => { if(s.dailyPnl) scaled(s, i).forEach((v, j) => { portfolio[j] += v; }); });
+  const m = pnlMetrics(portfolio, cap);
+
+  const pct = v => v === null ? '—' : (v*100).toFixed(1) + '%';
+  const money = v => v === null ? '—' : (v < 0 ? '−' + fmt(-v) : fmt(v)); // −$1,234 rather than $-1,234
+  const ratio = v => v === null ? '—' : v.toFixed(2);
+  document.getElementById('perfPeriod').textContent = dates[0] + ' → ' + dates[dates.length-1] + ' · ' + m.days + ' trading days';
+  const cards = [
+    ['total P&L', money(m.total), '', 'Sum of the portfolio\'s daily P&L over the period.'],
+    ['return on capital', pct(m.roc), '', 'Total P&L ÷ total margin capital.'],
+    ['annualised return', pct(m.annual), '', 'Return on capital scaled to a year (252 trading days).'],
+    ['Sharpe', ratio(m.sharpe), '', 'Average daily P&L ÷ its standard deviation, ×√252.'],
+    ['Sortino', ratio(m.sortino), '', 'Like Sharpe, but only losing days count as risk.'],
+    ['max drawdown', fmt(m.maxDD), pct(m.maxDDPct) + ' of capital', 'Largest fall from a peak in cumulative P&L.'],
+    ['Calmar', ratio(m.calmar), '', 'Annualised return ÷ max drawdown.'],
+    ['win rate', pct(m.winRate), '', 'Days with a gain, out of days with any P&L.'],
+    ['best day', money(m.best), '', 'Largest one-day gain.'],
+    ['worst day', money(m.worst), '', 'Largest one-day loss.']
+  ];
+  const esc = t => String(t).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+  document.getElementById('perfCards').innerHTML = cards.map(([label, value, sub, tip]) =>
+    `<div class="summary-card"><div class="label">${label}<span class="info-icon" data-tip="${esc(tip)}">?</span></div>` +
+    `<div class="value">${value}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`).join('');
+
+  const missing = state.strategies.filter((s, i) => dialOf(i) > 0 && (!s.dailyPnl || !(num(s.margin0DTE) > 0))).map(s => s.name);
+  const note = document.getElementById('perfNote');
+  note.style.display = missing.length ? 'block' : 'none';
+  note.textContent = missing.length ? 'No daily P&L or margin @0DTE for ' + missing.join(', ') + ' — left out of these figures.' : '';
+
+  const tbody = document.getElementById('perfStratBody');
+  tbody.innerHTML = '';
+  state.strategies.forEach((s, i) => {
+    const tr = document.createElement('tr');
+    const cell = (t, left) => { const td = document.createElement('td'); if(left) td.style.textAlign = 'left'; td.textContent = t; tr.appendChild(td); };
+    cell(s.name, true);
+    cell(pnlScale(s, i).toFixed(2));
+    if(!s.dailyPnl){ cell('no P&L data'); for(let k=0;k<5;k++) cell('—'); }
+    else if(dialOf(i) <= 0){ cell('not run'); for(let k=0;k<5;k++) cell('—'); }
+    else if(!(num(s.margin0DTE) > 0)){ cell('no margin @0DTE'); for(let k=0;k<5;k++) cell('—'); }
+    else{
+      const sm = pnlMetrics(scaled(s, i), cap);
+      cell(money(sm.total));
+      cell(m.total !== 0 ? (sm.total/m.total*100).toFixed(1) + '%' : '—');
+      cell(ratio(sm.sharpe));
+      cell(ratio(sm.sortino));
+      cell(fmt(sm.maxDD));
+      cell(pct(sm.winRate));
+    }
+    tbody.appendChild(tr);
+  });
+}
+
+// ---------- COMPARE WITH LIVE BACKTESTS ----------
+// Live daily P&L = last portfolio_value of the day − last portfolio_value of the previous
+// trading day (start 0), per backtest, from <backtest>/consolidated_store/YYYYMMDD.csv.
+function lastPortfolioValue(text){
+  const lines = text.split(/\r?\n/);
+  const col = lines[0].split(',').map(h => h.trim()).indexOf('portfolio_value');
+  if(col < 0) return null;
+  for(let i = lines.length - 1; i > 0; i--){
+    const f = lines[i].split(',');
+    if(f.length > col && f[col].trim() !== '' && Number.isFinite(Number(f[col]))) return Number(f[col]);
+  }
+  return null;
+}
+async function readLiveFolder(files){
+  const groups = {};
+  let folder = '';
+  Array.from(files).forEach(f => {
+    const p = f.webkitRelativePath || f.name;
+    if(!folder) folder = p.split('/')[0];
+    if(p.includes('__MACOSX')) return;
+    const m = p.match(/(?:^|\/)([^\/]+)\/([^\/]+)\/consolidated_store\/(\d{8})\.csv$/);
+    if(!m) return;
+    (groups[m[1] + ' ' + m[2]] = groups[m[1] + ' ' + m[2]] || []).push({ date: m[3].slice(0,4) + '-' + m[3].slice(4,6) + '-' + m[3].slice(6), file: f });
+  });
+  const backtests = {};
+  for(const [name, list] of Object.entries(groups).sort()){
+    const closes = await Promise.all(list.map(async e => ({ date: e.date, close: lastPortfolioValue(await e.file.text()) })));
+    let prev = 0;
+    const pnl = {};
+    closes.filter(c => c.close !== null).sort((a, b) => a.date < b.date ? -1 : 1).forEach(c => { pnl[c.date] = c.close - prev; prev = c.close; });
+    if(Object.keys(pnl).length) backtests[name] = pnl;
+  }
+  return { folder, backtests };
+}
+document.getElementById('liveFolder').addEventListener('change', async e => {
+  const status = document.getElementById('liveStatus');
+  if(!e.target.files.length) return;
+  status.style.display = 'block'; status.textContent = 'Reading ' + e.target.files.length.toLocaleString('en-US') + ' files…';
+  try{
+    const book = await readLiveFolder(e.target.files);
+    if(!Object.keys(book.backtests).length){ showToast('No consolidated_store CSVs found in that folder.', true); state.liveBook = null; }
+    else state.liveBook = book;
+    saveStateKeepSolve();
+  }catch(err){ console.error(err); showToast('Could not read the folder: ' + err.message, true); }
+  e.target.value = '';
+  renderLive();
+});
+document.getElementById('liveUsdInr').addEventListener('input', e => {
+  state.liveUsdInr = nonNegativeInput(e.target, 'USD/INR rate');
+  saveStateKeepSolve(); renderLive();
+});
+
+// The recommended book from the last solve, exactly as the performance section scales it.
+function recommendedBook(){
+  const withPnl = state.strategies.map((s, i) => ({ s, i })).filter(o => o.s.dailyPnl && Object.keys(o.s.dailyPnl).length);
+  const dates = [...new Set(withPnl.flatMap(o => Object.keys(o.s.dailyPnl)))].sort();
+  const series = {};
+  withPnl.forEach(({ s, i }) => { const k = pnlScaleOf(s, i); if(k > 0) series[s.name] = dates.map(d => k * (s.dailyPnl[d] || 0)); });
+  const combined = dates.map((d, j) => Object.values(series).reduce((a, v) => a + v[j], 0));
+  return { dates, series, combined };
+}
+
+const liveScaleOf = name => { const k = state.liveScales && state.liveScales[name]; return (k === undefined || k === null || k === '') ? 1 : num(k); };
+function renderLive(){
+  const status = document.getElementById('liveStatus');
+  const btn = document.getElementById('liveReportBtn');
+  const msg = document.getElementById('liveReportMsg');
+  document.getElementById('liveUsdInr').value = state.liveUsdInr;
+  const lb = state.liveBook;
+  const wrap = document.getElementById('liveScalesWrap'), tbody = document.getElementById('liveScalesBody');
+  if(lb && Object.keys(lb.backtests).length){
+    const rate = num(state.liveUsdInr);
+    status.textContent = 'Live folder "' + lb.folder + '": ' + Object.keys(lb.backtests).length + ' backtests.';
+    wrap.style.display = 'block';
+    tbody.innerHTML = '';
+    Object.entries(lb.backtests).forEach(([n, p]) => {
+      const tr = document.createElement('tr');
+      const cell = (t, left) => { const td = document.createElement('td'); if(left) td.style.textAlign = 'left'; td.textContent = t; tr.appendChild(td); return td; };
+      const raw = Object.values(p).reduce((a, b) => a + b, 0);
+      cell(n, true); cell(String(Object.keys(p).length));
+      const totCell = cell('');
+      const showTotal = () => { totCell.textContent = rate > 0 ? fmt(raw * liveScaleOf(n) / rate) : '—'; };
+      showTotal();
+      const td = document.createElement('td');
+      const inp = document.createElement('input');
+      inp.className = 'units-cell'; inp.style.width = '70px'; inp.type = 'number'; inp.min = '0'; inp.step = '0.1';
+      inp.dataset.field = 'live-scale'; inp.dataset.name = n; inp.value = liveScaleOf(n);
+      inp.addEventListener('input', e => {
+        state.liveScales = Object.assign({}, state.liveScales, { [n]: e.target.value === '' ? '' : nonNegativeInput(e.target, 'P&L scale') });
+        saveStateKeepSolve();
+        showTotal(); // update in place so the box keeps focus
+      });
+      inp.addEventListener('change', e => { if(e.target.value === '') { e.target.value = 1; state.liveScales[n] = 1; saveStateKeepSolve(); showTotal(); } });
+      td.appendChild(inp); tr.appendChild(td);
+      tbody.appendChild(tr);
+    });
+  }else{ status.textContent = 'No live folder loaded yet.'; wrap.style.display = 'none'; }
+  let why = '';
+  if(!lb) why = 'Choose a live folder first.';
+  else if(!(num(state.liveUsdInr) > 0)) why = 'Set the USD/INR rate.';
+  else if(!lastOptimalScales) why = 'Run "Solve MILP" first.';
+  else if(!Object.keys(recommendedBook().series).length) why = 'The recommended book has no daily P&L — upload strategies with a daily_pnl column.';
+  btn.disabled = !!why;
+  btn.style.opacity = why ? 0.5 : 1;
+  msg.textContent = why;
+}
+
+function buildLiveReport(){
+  const rate = num(state.liveUsdInr), cap = num(document.getElementById('totalCapital').value);
+  const lb = state.liveBook, rec = recommendedBook();
+  const liveDates = [...new Set(Object.values(lb.backtests).flatMap(p => Object.keys(p)))].sort();
+  const liveSeries = {};
+  Object.entries(lb.backtests).forEach(([n, p]) => {
+    const k = liveScaleOf(n), label = k === 1 ? n : n + ' (× ' + k + ')';
+    liveSeries[label] = liveDates.map(d => (p[d] || 0) * k / rate);
+  });
+  const liveCombined = liveDates.map((d, j) => Object.values(liveSeries).reduce((a, v) => a + v[j], 0));
+  const v = id => document.getElementById(id).value;
+  const lim = (mn, mx) => (num(v(mn)) > 0 ? fmt(num(v(mn))) : 'none') + ' / ' + (num(v(mx)) > 0 ? fmt(num(v(mx))) : 'none');
+  const objLabel = { total: 'Total utilization', maximin: 'Worst-day utilization', riskadj: 'Risk-adjusted return' }[state.objective];
+  const modeLabel = { dte: 'Derive from DTE curve', half: 'Expiry 0DTE, other days ½', independent: 'Independent by weekday' }[state.marginInputMode];
+  const config = [
+    ['Objective', objLabel + (state.objective === 'riskadj' ? ' (λ = ' + v('riskLambda') + ')' : '')],
+    ['Objective value', document.getElementById('objValue').textContent],
+    ['Horizon', state.horizon === 'monthly' ? 'Monthly (expiry week ' + v('monthlyExpiryWeek') + ')' : 'Weekly'],
+    ['Margin mode', modeLabel + (state.marginInputMode === 'dte' ? ' (c = ' + v('offsetC') + ', exponent = ' + v('exponent') + ')' : '')],
+    ['Total margin capital', fmt(cap)],
+    ['Min margin used — total', num(v('minTotalMargin')) > 0 ? fmt(num(v('minTotalMargin'))) : 'none'],
+    ['NF min / max', lim('minNF', 'capNF')], ['BN min / max', lim('minBN', 'capBN')], ['SN min / max', lim('minSN', 'capSN')],
+    ['Expiry weekdays', 'NF ' + v('nfExpiry') + ', BN ' + v('bnExpiry') + ', SN ' + v('snExpiry')],
+    ['Live folder', lb.folder + ' (' + Object.keys(lb.backtests).length + ' backtests)'],
+    ['USD/INR for live P&L', '₹' + rate + ' per $1'],
+    ['Live P&L scales', Object.keys(lb.backtests).filter(n => liveScaleOf(n) !== 1).map(n => n + ' × ' + liveScaleOf(n)).join(', ') || 'none (all × 1)']
+  ];
+  const stratRows = state.strategies.map((s, i) => [s.name, s.index, s.type, fmt(num(s.margin0DTE)), s.lotString,
+    s.minMarginPerStrategy ? fmt(s.minMarginPerStrategy) : 'none', s.maxMarginPerStrategy ? fmt(s.maxMarginPerStrategy) : 'none',
+    (lastOptimalScales[i] || 0).toFixed(4), pnlScaleOf(s, i).toFixed(4), fmt((lastOptimalScales[i] || 0) * peakUnitMargin(s))]);
+  const now = new Date(), pad = n => String(n).padStart(2, '0');
+  const stamp = now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes());
+  const data = {
+    generated: now.toLocaleString('en-GB'), generatedNote: 'Captured when this report was generated, from the solve it compares.',
+    usdInr: rate, capital: cap, liveFolder: lb.folder, config,
+    strategiesTable: { headers: ['strategy', 'index', 'type', 'margin @0DTE', 'lots', 'min $/strat', 'max $/strat', 'solved dial', 'P&L scale', 'peak-day margin'], rows: stratRows },
+    live: { dates: liveDates, series: liveSeries, combined: liveCombined },
+    dash: { dates: rec.dates, series: rec.series, combined: rec.combined }
+  };
+  const html = document.getElementById('liveReportTpl').textContent
+    .replace(/<\\\/script>/g, '</' + 'script>')
+    .replace('__DATA__', () => JSON.stringify(data).replace(/</g, '\\u003c')); // function: '$' in the data is literal
+  const fname = 'margin_vs_live_' + state.objective + (state.objective === 'riskadj' ? '_lambda' + v('riskLambda') : '') +
+    '_cap' + +(cap / 1e6).toFixed(2) + 'M_' + stamp + '.html';
+  return { html, fname };
+}
+document.getElementById('liveReportBtn').addEventListener('click', () => {
+  if(document.getElementById('liveReportBtn').disabled) return;
+  const { html, fname } = buildLiveReport();
+  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+  const a = document.createElement('a'); a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  showToast('Report downloaded: ' + fname);
+});
 
 // ---------- LOTS & TRADE INTERVAL ----------
 // Reference per index + type: `lots` at `intervalSec` seconds gives `margin` at 0 DTE.
@@ -977,7 +1715,7 @@ function renderSizingOut(){
   const wrap = document.getElementById('sizingOutWrap');
   let why = '';
   if(!state.strategies.length) why = 'No strategies yet — add some on the table above.';
-  else if(state.marginInputMode === 'independent') why = 'Lots & trade interval needs margin @0DTE — switch the strategies table to "Derive from DTE curve".';
+  else if(state.marginInputMode === 'independent') why = 'Lots & trade interval needs margin @0DTE — switch the strategies table to "Derive from DTE curve" or "Expiry 0DTE, other days ½".';
   else if(!lastOptimalScales) why = 'Run "Solve MILP" above first.';
   emptyMsg.style.display = why ? 'block' : 'none';
   emptyMsg.textContent = why;
@@ -1206,6 +1944,16 @@ document.getElementById('resetStrats').addEventListener('click', function(){
 });
 
 // ---------- FILE UPLOAD (xlsx / csv) ----------
+// daily_pnl column: a JSON object {"YYYY-MM-DD": pnl, ...} of the strategy's P&L at
+// dial = 1. Returns a clean {date: number} map, or null if it can't be read.
+function parsePnlSeries(v){
+  let obj = v;
+  if(typeof v === 'string'){ if(!v.trim()) return null; try{ obj = JSON.parse(v); }catch(e){ return null; } }
+  if(!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+  const out = {};
+  Object.entries(obj).forEach(([d, p]) => { const n = Number(p); if(/^\d{4}-\d{2}-\d{2}$/.test(d) && Number.isFinite(n)) out[d] = n; });
+  return Object.keys(out).length ? out : null;
+}
 function normalizeHeader(h){ return String(h||'').trim().toLowerCase().replace(/[\s_]+/g,''); }
 document.getElementById('fileUpload').addEventListener('change', (e)=>{
   const file = e.target.files[0];
@@ -1233,6 +1981,8 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
       const riskCol = findCol('risk');
       const lotsCol = findCol('lots','lotstring','lotpattern');
       const m0Col = findCol('margin0dte','0dtemargin','margin0');
+      const pnlCol = findCol('dailypnl','pnl','pnlseries');
+      let badPnl = 0;
       const indepCols = {mon:findCol('marginmon','mon'), tue:findCol('margintue','tue'), wed:findCol('marginwed','wed'), thu:findCol('marginthu','thu'), fri:findCol('marginfri','fri')};
 
       const parsed = rows.map(r=>{
@@ -1250,6 +2000,7 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
           risk: riskCol ? num(r[riskCol]) : 0,
           lotString: lotsCol ? String(r[lotsCol]).replace(/[^0-9]/g,'').slice(0,5) : '00000',
           margin0DTE: m0Col ? num(r[m0Col]) : 0,
+          dailyPnl: pnlCol ? (parsePnlSeries(r[pnlCol]) || (String(r[pnlCol]).trim() ? (badPnl++, null) : null)) : null,
           indepMargins: hasIndep ? {
             mon: indepCols.mon ? num(r[indepCols.mon]) : 0,
             tue: indepCols.tue ? num(r[indepCols.tue]) : 0,
@@ -1270,7 +2021,10 @@ document.getElementById('fileUpload').addEventListener('change', (e)=>{
         s.margin0DTE = clamp(s.margin0DTE);
         WEEKDAYS.forEach(d => { s.indepMargins[d] = clamp(s.indepMargins[d]); });
       });
-      if(negCount) showToast(negCount + ' negative margin value' + (negCount>1?'s':'') + ' in the file ' + (negCount>1?'were':'was') + ' set to 0 — margin cannot be negative.', true);
+      const warnings = [];
+      if(negCount) warnings.push(negCount + ' negative margin value' + (negCount>1?'s':'') + ' in the file ' + (negCount>1?'were':'was') + ' set to 0 — margin cannot be negative.');
+      if(badPnl) warnings.push(badPnl + ' daily_pnl value' + (badPnl>1?'s':'') + ' could not be read — expected {"YYYY-MM-DD": pnl, …}.');
+      if(warnings.length) showToast(warnings.join(' '), true);
 
       if(!parsed.length){ showToast('Could not find valid rows — check the index column has NF/BN/SN.', true); return; }
       state.strategies = state.strategies.concat(parsed);
@@ -1389,10 +2143,10 @@ function renderFormulation(){
     s += `  maximize   z\n`;
   }else{
     const terms = state.strategies.map((strat,i)=>{
-      const coeff = num(strat.expectedReturn) - lambda*num(strat.risk);
+      const coeff = marginFactor(strat) * (num(strat.expectedReturn) - lambda*num(strat.risk));
       return `${coeff.toFixed(1)}*x_${i+1}`;
     }).join(' + ');
-    s += `  maximize   ${terms}\n            (expected return - lambda*risk at scale 1, lambda = ${lambda})\n`;
+    s += `  maximize   ${terms}\n            ((expected return - lambda*risk) x margin one dial ties up / margin@0DTE, lambda = ${lambda})\n`;
   }
 
   s += '\nCONSTRAINTS\n';
@@ -1504,7 +2258,7 @@ function buildAndSolve(){
       }
     });
     if(state.objective === 'total') coeffs['totalUtil'] = totalUtilCoeff;
-    if(state.objective === 'riskadj') coeffs['riskObj'] = num(s.expectedReturn) - lambda*num(s.risk);
+    if(state.objective === 'riskadj') coeffs['riskObj'] = marginFactor(s) * (num(s.expectedReturn) - lambda*num(s.risk));
     variables[varName] = coeffs;
   });
 
@@ -1651,8 +2405,8 @@ function setupCollapsiblePanels(){
 
 loadState();
 applyDomBackedFields();
-document.getElementById('marginModeDteBtn').classList.toggle('active', state.marginInputMode!=='independent');
-document.getElementById('marginModeIndepBtn').classList.toggle('active', state.marginInputMode==='independent');
+if(!MARGIN_MODE_BTNS[state.marginInputMode]) state.marginInputMode = 'dte';
+refreshMarginModeButtons();
 render();
 refreshHorizonLock();
 refreshObjectiveUI();

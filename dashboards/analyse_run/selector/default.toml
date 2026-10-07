@@ -1,0 +1,25 @@
+# Default selector config (DESIGN.md §4). Copy it, then set n and the constraints for each use.
+# Fields left out take their defaults: role = "objective", sign = "none", eps = 0.
+
+[selection]
+n         = 3          # how many variants to select
+id_column = "Variant"  # column holding the variant IDs
+
+[[metric]]
+name      = "Final P&L"
+direction = "max"
+
+[[metric]]
+name      = "Max drawdown"
+direction = "min"
+sign      = "auto"     # ranking.py stores it negative; auto checks this
+
+[[metric]]
+name      = "Sortino"
+direction = "max"
+
+# Constraints are optional. Example:
+# [[constraint]]
+# metric = "Max drawdown"
+# op     = "<="
+# value  = 250000      # |drawdown| <= 2.5L, however it's stored

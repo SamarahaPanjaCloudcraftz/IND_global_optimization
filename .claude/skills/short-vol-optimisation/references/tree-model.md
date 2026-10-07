@@ -184,7 +184,7 @@ What differs between the two:
 | lot size | 65 | 20 |
 | steps | 50 | 100 |
 | OTM outstrike | 5 | 4 |
-| session | 09:17–15:30 | 09:20–15:29 |
+| session | 09:17–15:30 | 09:17–15:29 |
 | baseline `percent_hedge` | 0.5 | 1.0 |
 | `gamma_threshold` | 90 | 0.04 |
 

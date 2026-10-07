@@ -2,8 +2,17 @@
 
 2026-09-23 · @Samaraha
 
-A restructure we want but cannot do yet, the engine change it waits on, and what
-to do when that lands. Nothing here is built.
+A restructure we want, the engine change it waited on, and what to do now that
+it has landed.
+
+> **Update 2026-10-01:** the precondition below is met — the engine now accepts
+> `underlying_threshold_hedge_type` as a weekday dict
+> (`hedge_component.py`, `cfg_type = cfg_type[timestamp.weekday()]`). The
+> strategy uses it: each `delta_hedging/<mode>/<weekday>` branch sets the mode
+> on its own weekday only and the baseline mode (`static`) on the held days, so
+> held days are no longer hedged under the swept mode with the baseline k. The
+> tree inversion itself was **not** done — the analysis dashboard assumes the
+> weekday is the last path level — so the nesting is still mode above weekday.
 
 ## What we have
 

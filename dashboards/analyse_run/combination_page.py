@@ -8,7 +8,9 @@ is reused rather than run again. A section only appears once every result it
 compares exists, so no best-of is ever read off a half-finished round.
 """
 
+import json
 import re
+import shutil
 from collections.abc import Callable
 from datetime import time
 from pathlib import Path
@@ -214,16 +216,20 @@ def render(stage_dir: Path, scope: str, strategy: str, winners: dict, weekdays: 
                 name = st.text_input("CSV name", value=default,
                                      key=f"{scope}:combine:csv-name:{final_by}:{risk_by}")
                 save = st.button("Save CSV", key=f"{scope}:combine:csv-save", icon=":material/save:")
-            if save:
-                _save_margin_csv(sheet, folder, name)
-            st.caption(f"Saves the margin desk strategies to {folder}. "
+            if save and _save_margin_csv(sheet, folder, name):
+                _write_recommendation({w: result(c) for w, c in picks.items()},
+                                      stage_dir / C.COMBINATIONS / RECOMMENDATION)
+            st.caption(f"Saves the margin desk strategies to {folder}, and copies each "
+                       f"weekday's selected run into {stage_dir / C.COMBINATIONS / RECOMMENDATION}"
+                       "/<weekday>, replacing what an earlier save put there. "
                        "One weekly strategy per weekday, in the margin desk's upload format. "
                        "lots marks the days each position is held; margin_0dte scales the "
-                       "reference 0 DTE margin (NIFTY: 260 units every 5 min = $6M; SENSEX: 40 "
-                       "units every 3 min = $5M) by the run's units ÷ trade interval; "
+                       "reference 0 DTE margin (NIFTY: 260 units every 5 min = $1.2M; SENSEX: 40 "
+                       "units every 3 min = $1M) by the run's units ÷ trade interval; "
                        "expected_return is its total P&L in the selected date range, and risk "
                        "the size of its max drawdown or the standard deviation of its daily "
-                       "P&L on the days it has P&L in that range, as chosen above — all on the "
+                       "P&L on the days it has P&L in that range, as chosen above, and "
+                       "daily_pnl its P&L per day in that range — all on the "
                        "baseline's margin, exactly as in the table. current_margin and the "
                        "min / max margins are left at 0, to be filled in on the desk.")
         with st.expander("All nine candidates, per weekday"):
@@ -240,35 +246,61 @@ FINAL_NAMES = {"delta_hedging": "best delta hedge", "gamma_hedging": "best gamma
                "trade_time": "best entry time"}
 
 MARGIN_CSVS = "margin_csvs"
+RECOMMENDATION = "recommendation"
 # Risk column choices for the margin desk CSV -> the suffix naming the file.
 RISK_MEASURES = {"Max drawdown": "maxdd", "Daily P&L std": "dailystd"}
 RISK_DEFAULT = "Max drawdown"
 
 
-def _save_margin_csv(sheet: pd.DataFrame, folder: Path, name: str) -> None:
-    """Write the sheet as <folder>/<name>.csv, never replacing an existing file."""
+def _save_margin_csv(sheet: pd.DataFrame, folder: Path, name: str) -> bool:
+    """Write the sheet as <folder>/<name>.csv, never replacing an existing file.
+    Returns whether it was written."""
     stem = name.strip()
     if stem.lower().endswith(".csv"):
         stem = stem[:-4].strip()
     if not stem or any(ch in stem for ch in "/\\") or stem.startswith("."):
         st.error("Enter a file name without slashes, e.g. margin_desk_NIFTY_Composite.",
                  icon=":material/error:")
-        return
+        return False
     path = folder / f"{stem}.csv"
     if path.exists():
         st.error(f"{path.name} already exists in {folder} — choose another name.",
                  icon=":material/error:")
-        return
+        return False
     folder.mkdir(parents=True, exist_ok=True)
     sheet.to_csv(path, index=False)
     st.success(f"Saved {path}", icon=":material/check_circle:")
+    return True
+
+
+def _write_recommendation(runs: dict, folder: Path) -> None:
+    """Copy each weekday's selected run to <folder>/<weekday>/<run directory>.
+
+    One folder holding the latest save's picks: a weekday already holding that
+    run is left alone, one holding a different run has it replaced. Only the
+    copies under <folder> are ever removed, never the runs they came from.
+    """
+    for weekday, source in runs.items():
+        if source is None:
+            st.warning(f"{weekday}: the selected variant has no result to copy.",
+                       icon=":material/warning:")
+            continue
+        source = Path(source)
+        target = folder / weekday
+        if (target / source.name).is_dir() and len(list(target.iterdir())) == 1:
+            continue
+        if target.exists():
+            shutil.rmtree(target)
+        target.mkdir(parents=True)
+        shutil.copytree(source, target / source.name)
+    st.success(f"Recommendation runs in {folder}", icon=":material/folder_copy:")
 
 
 # The margin desk's index codes, and the columns of its upload file, in its order.
 DESK_INDEX = {"NIFTY": "NF", "BANKNIFTY": "BN", "SENSEX": "SN"}
 # 0 DTE margin at a reference size, per index: (unit_size, trade interval in
 # minutes, margin in $). Margin scales with units ÷ interval, as on the desk.
-DESK_REF_MARGIN = {"NF": (260, 5, 6_000_000), "SN": (40, 3, 5_000_000)}
+DESK_REF_MARGIN = {"NF": (260, 5, 1_200_000), "SN": (40, 3, 1_000_000)}
 
 
 def _margin_0dte(config: dict, index: str) -> float:
@@ -278,7 +310,7 @@ def _margin_0dte(config: dict, index: str) -> float:
     units, minutes, dollars = DESK_REF_MARGIN[index]
     return round(dollars * (config["unit_size"] / units) * (minutes / config["trade_interval_time"]), 2)
 DESK_COLUMNS = ["strategy", "index", "type", "margin_0dte", "min_margin", "max_margin",
-                "lots", "current_margin", "expected_return", "risk"]
+                "lots", "current_margin", "expected_return", "risk", "daily_pnl"]
 
 
 def _held_days(config: dict, day: int) -> str:
@@ -307,10 +339,12 @@ def _margin_desk_sheet(picks: dict, equity: dict, risk_by: str = RISK_DEFAULT,
                        factors: dict | None = None) -> pd.DataFrame:
     """One margin-desk strategy row per weekday's recommended variant.
 
-    expected_return is the total P&L of the range; risk is chosen by `risk_by`.
-    Both are multiplied by the weekday's margin factor (baseline margin ÷ the
-    variant's), which scales a P&L series and so its drawdown and its standard
-    deviation alike.
+    expected_return is the total P&L of the range; risk is chosen by `risk_by`;
+    daily_pnl is a JSON {date: P&L} of every day in the range, the change in
+    end-of-day portfolio value, so it sums to expected_return. All three are
+    multiplied by the weekday's margin factor (baseline margin ÷ the variant's),
+    which scales a P&L series and so its drawdown and its standard deviation
+    alike.
     The lot pattern is written with a leading apostrophe: the desk reads files
     through SheetJS, which would otherwise turn "00110" into the number 110 and
     shift the days, and the desk strips non-digits from the column anyway.
@@ -329,6 +363,8 @@ def _margin_desk_sheet(picks: dict, equity: dict, risk_by: str = RISK_DEFAULT,
             "current_margin": 0,
             "expected_return": round(float(curve["equity"].iloc[-1]), 2) if not curve.empty else 0,
             "risk": _risk(curve, risk_by),
+            "daily_pnl": json.dumps({f"{day:%Y-%m-%d}": round(float(value), 2) for day, value
+                                     in series.pnl(curve, "Daily").itertuples(index=False)}),
         })
     return pd.DataFrame(rows, columns=DESK_COLUMNS)
 

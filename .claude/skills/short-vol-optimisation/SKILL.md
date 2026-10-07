@@ -212,8 +212,10 @@ Do not present any of these as working:
   the analysis dashboard.
 - **The entry-window constraint** — an entry end at or before the start sells
   nothing — is not enforced in the UI.
-- **Weekday-first delta hedging** is blocked on the backtest engine making
-  `underlying_threshold_hedge_type` weekday-keyed. See
+- **Weekday-first delta hedging** (inverting the tree to weekday above mode)
+  is not built. Its engine precondition has landed — the mode is weekday-keyed
+  and each delta branch already sets it on its own weekday only — but the
+  analysis dashboard assumes the weekday is the last path level. See
   `docs/Weekday_first_hedging.md`.
 - **The `IVWAP` axis** is named in the optimisation table but has no constant,
   module or reference in the backtest engine; the tree reports it as pending.

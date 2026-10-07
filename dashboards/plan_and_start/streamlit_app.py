@@ -69,12 +69,20 @@ with st.sidebar:
             runner = P.load_run_one(runner_spec)
         except Exception as error:  # noqa: BLE001 - shown, not swallowed
             runner_error = f"`{runner_spec}` — {type(error).__name__}: {error}"
-    period = st.date_input(
-        "Backtest period",
-        value=(strategy.baseline["start_date"], strategy.baseline["end_date"]),
-        key=f"period_{name}",
-        help="Common to every run in the sweep.",
+    start_date = st.date_input(
+        "Start date", value=strategy.baseline["start_date"],
+        key=f"start_{name}", help="Common to every run in the sweep.",
     )
+    latest = getattr(strategy, "last_data_date", lambda: None)()
+    end_date = st.date_input(
+        "End date", value=latest or strategy.baseline["end_date"],
+        key=f"end_{name}",
+        help="Common to every run in the sweep. Defaults to the last day in the "
+             "data directory.",
+    )
+    st.caption(f"Last day in the data directory: {latest:%d %b %Y}" if latest
+               else "No data files found in the data directory.")
+    period = (start_date, end_date)
 
     unit_size = st.number_input(
         "Unit size", min_value=1, step=1,
@@ -87,9 +95,17 @@ with st.sidebar:
         key=f"interval_{name}", help="Common to every run in the sweep.",
     )
 
-    minutes = st.number_input(
-        "Minutes per backtest", min_value=0.1, value=5.0, step=0.5,
-        help="Only used for the time estimate.",
+    # Measured 2026-10-01 on the real engine, logs off: a NIFTY Wednesday
+    # hold-to-expiry job over 2026-01-01..09-02 (175 weekdays) took 113.5 s and
+    # 57 MB. Per weekday rather than per trading day, so holidays are already
+    # in the rate. NIFTY is the standard for both underlyings.
+    seconds_per_day = st.number_input(
+        "Seconds per weekday, per backtest", min_value=0.01, value=0.65, step=0.05,
+        help="Only used for the estimates. Scales with the backtest period.",
+    )
+    mb_per_day = st.number_input(
+        "MB per weekday, per backtest", min_value=0.01, value=0.33, step=0.01,
+        help="Only used for the estimates. Logs and gamma_log off.",
     )
 
     if runner:
@@ -113,8 +129,8 @@ with st.sidebar:
                 baseline[key] = value
                 bad_baseline.append(f"`{key}`: {error}")
 
-if not isinstance(period, tuple) or len(period) != 2:
-    st.warning("Pick both ends of the backtest period.", icon=":material/date_range:")
+if period[1] < period[0]:
+    st.warning("The end date is before the start date.", icon=":material/date_range:")
     st.stop()
 baseline["start_date"], baseline["end_date"] = period
 baseline["unit_size"] = int(unit_size)
@@ -683,8 +699,12 @@ plan = P.build_plan(
     only=selected, run=run, stage=stage, runner=runner_spec or "",
     groups=groups,
 )
-estimate = plan.size.runs * minutes
+weekdays = sum(1 for offset in range((period[1] - period[0]).days + 1)
+               if date.fromordinal(period[0].toordinal() + offset).weekday() < 5)
+estimate = plan.size.runs * weekdays * seconds_per_day / 60   # minutes
 estimate_text = f"{int(estimate // 60)}h {int(estimate % 60):02d}m"
+disk_gb = plan.size.runs * weekdays * mb_per_day / 1000
+disk_text = f"{disk_gb:,.1f} GB"
 
 with st.container(horizontal=True):
     st.metric(
@@ -698,7 +718,11 @@ with st.container(horizontal=True):
         delta=f"-{plan.size.deduped} deduped" if plan.size.deduped else None,
         delta_color="off",
     )
-    st.metric("Estimated time", estimate_text, border=True, icon=":material/schedule:")
+    st.metric("Estimated time", estimate_text, border=True, icon=":material/schedule:",
+              help=f"{plan.size.runs} backtests × {weekdays} weekdays × "
+                   f"{seconds_per_day:g} s, run one after another.")
+    st.metric("Estimated disk", disk_text, border=True, icon=":material/hard_drive:",
+              help=f"{plan.size.runs} backtests × {weekdays} weekdays × {mb_per_day:g} MB.")
 
 with st.container(border=True):
     st.subheader("Jobs", icon=":material/table_chart:")
@@ -731,7 +755,7 @@ with st.container(border=True):
 # ---------------------------------------------------------------- start
 
 confirmed = st.toggle(
-    f"Confirm {plan.size.runs} backtests, about {estimate_text}",
+    f"Confirm {plan.size.runs} backtests, about {estimate_text} and {disk_text}",
     disabled=runner is None or in_progress,
     help="A sweep is already running in this stage." if in_progress
          else ("Starting cannot be undone from here." if runner

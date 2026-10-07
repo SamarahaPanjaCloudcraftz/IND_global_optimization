@@ -203,8 +203,10 @@ Two standing constraints from the owner:
   prominently **before** a sweep runs — not after.
 
 Changes to the engine that this project has wanted are documented rather than
-made: `docs/Weekday_first_hedging.md` describes the restructure that is blocked
-on `underlying_threshold_hedge_type` becoming weekday-keyed (the constant already
-is, at `hedge_component.py`'s `isinstance(cfg_constant, dict)` branch; the type
-is still a plain scalar). When engine work is needed, write a self-contained
+made: `docs/Weekday_first_hedging.md` describes the tree restructure. Its
+engine precondition has landed: `underlying_threshold_hedge_type` and
+`underlying_threshold_hedge_constant` are both weekday-keyed dicts, indexed by
+`timestamp.weekday()` in `hedge_component.py` (a plain string still works). The
+strategy sets each delta branch's mode on its own weekday and `static` on the
+held days. When engine work is needed, write a self-contained
 handoff document and let the owner implement it in their own process.

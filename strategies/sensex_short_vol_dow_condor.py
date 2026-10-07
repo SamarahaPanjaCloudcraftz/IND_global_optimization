@@ -18,7 +18,7 @@ class Sensex(DowCondor):
     expiry_weekday = 3          # Thursday
     data_dir = "/home/oem/Documents/unit_tasks/IND_backtest/SENSEX/"
     period = (date(2025, 9, 5), date(2026, 5, 15))
-    trade_start = time(9, 20, 0)
+    trade_start = time(9, 17, 0)
     trade_end = time(15, 29, 0)
     steps = 100
     otm_outstrike = 4

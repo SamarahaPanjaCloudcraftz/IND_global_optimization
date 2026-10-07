@@ -14,7 +14,8 @@ entry windows, and the OTM outstrike gives the static wing percentage. A fact
 stated once cannot disagree with itself.
 """
 
-from datetime import date, time
+import os
+from datetime import date, datetime, time
 
 from engine import Internal, Leaf, Node, PRODUCT, SUM
 
@@ -77,6 +78,20 @@ class DowCondor:
     short_static = 2
 
     # ---- derived ------------------------------------------------------------
+
+    def last_data_date(self) -> date | None:
+        """The last trading day with options data in `data_dir`, or None.
+
+        Files are `<UNDERLYING>_<trade date>_<expiry>_Intraday_Preprocessed.csv`.
+        """
+        try:
+            names = os.listdir(self.data_dir)
+        except OSError:
+            return None
+        days = [name.split("_")[1] for name in names
+                if name.startswith(f"{self.underlying}_")
+                and name.endswith("_Intraday_Preprocessed.csv")]
+        return datetime.strptime(max(days), "%Y%m%d").date() if days else None
 
     @property
     def entry_start(self) -> dict:
@@ -146,10 +161,18 @@ class DowCondor:
         return Internal("gamma_hedging", SUM,
                         [self.gamma_day(day) for day in range(5)])
 
+    def hedge_modes_for(self, weekday: int, mode: str) -> dict:
+        """The mode on this weekday alone; the other weekdays keep the baseline
+        mode, so the days the position is only held are hedged as the baseline
+        hedges them, with the baseline k they hold."""
+        return {day: (mode if day == weekday else self.baseline_hedge_mode)
+                for day in range(5)}
+
     def hedge_day(self, mode: str, weekday: int) -> Internal:
         """One weekday under one hedging mode: its k values against the pct."""
+        modes = self.hedge_modes_for(weekday, mode)
         return Internal(WEEKDAY_NAMES[weekday], PRODUCT, [
-            Leaf("underlying_threshold_hedge_type", [mode], domain=[mode]),
+            Leaf("underlying_threshold_hedge_type", [modes], domain=[modes]),
             Leaf("underlying_threshold_hedge_constant", [dict(self.hedge_constant)]),
             Leaf("percent_hedge", list(self.hedge_pct)),
             Leaf("custom_pct_to_hedge", [True], domain=[False, True]),
@@ -269,7 +292,9 @@ class DowCondor:
     # the bare parameter name, so a range that is the same everywhere is stated
     # once and one that differs per weekday is stated per weekday.
 
-    percent_hedge_range = (0.5, 1.2, 8)      # sheet says 50-120, in percent
+    # The sheet says 50-120 percent, but percent_hedge is one value for the
+    # whole run, not per weekday, so the default holds it at a full hedge.
+    percent_hedge_range = (1.0, 1.0, 1)
     gamma_percent_hedge_range = (0.25, 1.0, 5)   # the sheet's "pct gamma hedge"
     # Per weekday, because the sheet gives a different band for each.
     gamma_threshold_ranges: dict
@@ -343,7 +368,8 @@ class DowCondor:
             "gamma_threshold": self.gamma_threshold,
             "gamma_hege_otm_outstrike": 50,
             "gamma_hedge_trade_direction": "both",
-            "underlying_threshold_hedge_type": self.baseline_hedge_mode,
+            "underlying_threshold_hedge_type":
+                {day: self.baseline_hedge_mode for day in range(5)},
             "underlying_threshold_hedge_constant": dict(self.hedge_constant),
             "percent_hedge": self.hedge_pct[0],
             "gamma_pct_hedge": self.hedge_pct[0],

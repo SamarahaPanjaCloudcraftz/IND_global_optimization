@@ -1,0 +1,33 @@
+# Selector config for the axis tables (one axis x one weekday). DESIGN.md §4.
+# Adds the Deflated Sharpe Ratio and the CSCV consistency score
+# (docs/DSR_and_CSCV.md). Sortino and DSR both measure return per unit of risk,
+# so they share one unit of weight: P&L, drawdown and CSCV 25% each,
+# Sortino and DSR 12.5% each. The Combine page's best-of and recommendation
+# steps use default.toml instead.
+
+[selection]
+n         = 1          # overridden by the dashboard
+id_column = "Variant"
+
+[[metric]]
+name      = "Final P&L"
+direction = "max"
+
+[[metric]]
+name      = "Max drawdown"
+direction = "min"
+sign      = "auto"     # ranking.py stores it negative; auto checks this
+
+[[metric]]
+name      = "Sortino"
+direction = "max"
+group     = "return per unit of risk"
+
+[[metric]]
+name      = "DSR"
+direction = "max"
+group     = "return per unit of risk"
+
+[[metric]]
+name      = "CSCV"
+direction = "max"

@@ -19,6 +19,8 @@ import ranking
 MONEY = "{:,.0f}"
 FORMATS = {"Final P&L": MONEY, "Max drawdown": MONEY, "Sortino": "{:.2f}"}
 METRICS = list(FORMATS)
+# Axis tables only: shown as values, not as a change from the baseline.
+ROBUST_FORMATS = {"DSR": "{:.3f}", "CSCV": "{:.3f}"}
 
 
 def _metrics(keys: list[str], choices: dict, config_of: dict, curve: Callable,
@@ -26,7 +28,7 @@ def _metrics(keys: list[str], choices: dict, config_of: dict, curve: Callable,
     frames = {k: curve(choices[k], selling) for k in keys}
     frames = {k: f for k, f in frames.items() if not f.empty}
     margins = {k: margin.margin_factor(config_of[choices[k].digest]) for k in frames}
-    return ranking.table(frames, margins, reference) if frames else pd.DataFrame()
+    return ranking.table(frames, margins, reference, robust=True) if frames else pd.DataFrame()
 
 
 def _show(rows: list[dict], numeric: bool = True) -> None:
@@ -142,6 +144,10 @@ def render(scope: str, roots: list[str], weekdays_of: dict[str, list[str]],
                     for name in METRICS:
                         row[name] = (_against(top[name], reference.iloc[0][name], FORMATS[name])
                                      if len(reference) else FORMATS[name].format(top[name]))
+                    for name, form in ROBUST_FORMATS.items():
+                        row[name] = "—" if pd.isna(top.get(name)) else form.format(top[name])
+                    pbo = table.attrs.get("PBO")
+                    row["Table PBO"] = "—" if pbo is None or pd.isna(pbo) else f"{pbo:.2f}"
                     rows.append(row)
                 if picked.empty:
                     row = {"Weekday": weekday, **({"#": "—"} if n > 1 else {})}

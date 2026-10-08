@@ -244,7 +244,7 @@ margins = {label: margin.margin_factor(config_of[job.digest])
 all_frames = {label: curve(job, selling) for label, job in choices.items()}
 all_frames = {label: frame for label, frame in all_frames.items() if not frame.empty}
 reference = margin.margin_factor(config_of[base.digest]) if base else 1.0
-ranked = list(ranking.table(all_frames, margins, reference)["Variant"]) if all_frames else []
+ranked = list(ranking.table(all_frames, margins, reference, robust=True)["Variant"]) if all_frames else []
 if "Ranking" in shown and all_frames:
     table_view = panels.View(axis=axis, frames=all_frames,
                              colours=charts.colours(list(all_frames), dark), dark=dark,

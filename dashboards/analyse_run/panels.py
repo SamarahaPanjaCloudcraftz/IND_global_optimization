@@ -69,10 +69,21 @@ def _grain(view: View, suffix: str) -> str:
 def _ranking(view: View) -> None:
     st.caption("P&L and drawdown are in ₹, as each variant would earn on the baseline's "
                "margin. Ranks: 1 is best, ties share the average. Composite is the "
-               "weighted sum of the three ranks — lower is better. The Selector columns "
-               "are the multi-objective selector's verdict: Pareto front (1 = beaten by "
-               "nothing), score (lower is better), its rank, status and reason.")
-    table, notes = ranking.selector_audit(ranking.table(view.frames, view.margins, view.reference))
+               "weighted sum of the ranks — lower is better: P&L, drawdown and CSCV count 1 "
+               "each, Sortino and DSR ½ each. DSR is the Deflated Sharpe Ratio (the "
+               "probability the true Sharpe beats the best this many variants would reach "
+               "by luck); CSCV is the average out-of-sample rank across 20 time splits "
+               "(higher is more consistent). The Selector columns are the multi-objective "
+               "selector's verdict: Pareto front (1 = beaten by nothing), score (lower is "
+               "better), its rank, status and reason.")
+    ranked = ranking.table(view.frames, view.margins, view.reference, robust=True)
+    pbo = ranked.attrs.get("PBO")
+    if pbo is not None and pd.notna(pbo):
+        st.markdown(f"**Probability of backtest overfitting (PBO) for this table: {pbo:.2f}** — "
+                    "how often the in-sample best of these variants falls to or below the "
+                    "median out of sample (0 is reliable, around 0.5 or more is no better "
+                    "than chance).")
+    table, notes = ranking.selector_audit(ranked)
     for note in notes:
         st.caption(note)
     keys = table["Variant"].copy()
@@ -83,6 +94,7 @@ def _ranking(view: View) -> None:
     formats = {"Final P&L": rupees, "Max drawdown": rupees, "Sortino": "{:.2f}"}
     formats.update({c: "{:g}" for c in table.columns if c.endswith("rank") or c == "Composite"})
     formats["Selector score"] = "{:.3f}"
+    formats.update({"DSR": "{:.3f}", "CSCV": "{:.3f}"})
 
     # The baseline is ranked with everything else; its row is repeated above the
     # table so the reference numbers are in view however far down it ranks.

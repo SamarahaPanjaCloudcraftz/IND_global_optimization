@@ -5,7 +5,13 @@ the average rank), and the ranks are combined by weighted sum into a composite
 where lower is better. Metrics, directions and weights all live here.
 
 A table can also be ordered by the multi-objective selector (`selector/`),
-driven by `selector/default.toml`, whose metric names are this table's columns.
+whose metric names are this table's columns.
+
+Axis tables (one axis x one weekday) add two overfitting-aware metrics, the
+Deflated Sharpe Ratio and a CSCV consistency score, and carry the table's PBO
+(see robustness.py and docs/DSR_and_CSCV.md); they rank with
+`selector/axis.toml`. The Combine page's best-of and recommendation tables do
+not, and rank with `selector/default.toml`.
 """
 
 from dataclasses import replace
@@ -15,23 +21,35 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import robustness
 import selector
 import series
 
 WEIGHTS = {"Final P&L": 1.0, "Max drawdown": 1.0, "Sortino": 1.0}
+# Axis tables: Sortino and DSR both measure return per unit of risk, so they
+# share one unit of weight, as they share one group in selector/axis.toml.
+ROBUST_WEIGHTS = {"Final P&L": 1.0, "Max drawdown": 1.0, "Sortino": 0.5, "DSR": 0.5, "CSCV": 1.0}
+ROBUST = ("DSR", "CSCV")
 
 # True: a larger value ranks better.
-HIGHER_IS_BETTER = {"Final P&L": True, "Max drawdown": True, "Sortino": True}
+HIGHER_IS_BETTER = {"Final P&L": True, "Max drawdown": True, "Sortino": True,
+                    "DSR": True, "CSCV": True}
 
 
 SELECTOR = "Selector"
 TOP_BY = [SELECTOR, "Composite", "Final P&L", "Sortino", "Max drawdown"]
 SELECTOR_CONFIG = Path(__file__).resolve().parent / "selector" / "default.toml"
+AXIS_SELECTOR_CONFIG = Path(__file__).resolve().parent / "selector" / "axis.toml"
 
 
-@lru_cache(maxsize=1)
-def _selector_config() -> "selector.Config":
-    return selector.load(SELECTOR_CONFIG)
+@lru_cache(maxsize=2)
+def _load(path: Path) -> "selector.Config":
+    return selector.load(path)
+
+
+def _selector_config(table: pd.DataFrame) -> "selector.Config":
+    """axis.toml for a table carrying DSR and CSCV, default.toml otherwise."""
+    return _load(AXIS_SELECTOR_CONFIG if set(ROBUST) <= set(table.columns) else SELECTOR_CONFIG)
 
 
 def top(table: pd.DataFrame, basis: str, n: int = 1) -> tuple[pd.DataFrame, list[str]]:
@@ -48,7 +66,7 @@ def top(table: pd.DataFrame, basis: str, n: int = 1) -> tuple[pd.DataFrame, list
         return table, []
     if basis == SELECTOR:
         try:
-            result = selector.select(table, replace(_selector_config(), n=n))
+            result = selector.select(table, replace(_selector_config(table), n=n))
         except (selector.ConfigError, selector.DataError) as error:
             return table.iloc[0:0], [f"Selector: {error}"]
         notes = [f"Selector: {warning}" for warning in result.run["warnings"]]
@@ -73,7 +91,7 @@ def selector_audit(table: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     if table.empty:
         return table, []
     try:
-        result = selector.select(table, replace(_selector_config(), n=1))
+        result = selector.select(table, replace(_selector_config(table), n=1))
     except (selector.ConfigError, selector.DataError) as error:
         return table, [f"Selector: {error}"]
     audit = result.audit.rename(columns={"front": "Front", "score": "Selector score",
@@ -106,22 +124,40 @@ def metrics(equity: pd.DataFrame, margin: float) -> dict:
 
 
 def table(frames: dict[str, pd.DataFrame], margins: dict[str, float],
-          reference: float = 1.0) -> pd.DataFrame:
+          reference: float = 1.0, robust: bool = False) -> pd.DataFrame:
     """Ranked metrics, with money expressed at `reference` margin.
 
     Scaling every variant by the same reference changes no rank; it only puts
     the per-margin numbers back into rupees at a familiar size.
+
+    With `robust` (axis tables) the table also gets DSR and CSCV, computed
+    across exactly these variants, and its PBO in `table.attrs["PBO"]`.
     """
     rows = [{"Variant": label, **metrics(frame, margins.get(label, 0.0))}
             for label, frame in frames.items()]
     out = pd.DataFrame(rows)
     out["Final P&L"] *= reference
     out["Max drawdown"] *= reference
+    weights = WEIGHTS
+    pbo = np.nan
+    if robust:
+        # Ratios: margin scaling cancels, so the raw daily P&L is used. Only
+        # variants with valid basic metrics take part, and N counts them.
+        valid = [label for label, value in zip(out["Variant"], out["Final P&L"]) if np.isfinite(value)]
+        daily = {label: series.pnl(frames[label], "Daily").set_index("date")["pnl"] for label in valid}
+        dsr, _ = robustness.dsr_table(daily)
+        consistency, pbo = robustness.cscv_table(daily)
+        out["DSR"] = out["Variant"].map(dsr).astype(float)
+        out["CSCV"] = out["Variant"].map(consistency).astype(float)
+        weights = ROBUST_WEIGHTS
     composite = 0.0
-    for name, weight in WEIGHTS.items():
+    for name, weight in weights.items():
         rank = out[name].rank(method="average", ascending=not HIGHER_IS_BETTER[name],
                               na_option="bottom")
         out[f"{name} rank"] = rank
         composite = composite + weight * rank
     out["Composite"] = composite
-    return out.sort_values("Composite").reset_index(drop=True)
+    out = out.sort_values("Composite").reset_index(drop=True)
+    if robust:
+        out.attrs["PBO"] = pbo
+    return out

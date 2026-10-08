@@ -490,10 +490,16 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
       </div>
     </div>
   </div>
+  <div class="table-scroll" style="max-width:560px;margin-top:10px;">
+  <table>
+    <thead><tr><th style="text-align:left;">live margin rule<span class="info-icon" data-tip="Unit size sold every interval, held to expiry, needs this margin. Unwound before expiry: half. Used to work out each live backtest's margin from its blotters.">?</span></th><th>unit size</th><th>interval (s)</th><th><span id="liveRuleMarginLabel">margin ($)</span></th></tr></thead>
+    <tbody id="liveRuleBody"></tbody>
+  </table>
+  </div>
   <div id="liveStatus" class="empty-state" style="margin-top:10px;">No live folder loaded yet.</div>
   <div class="table-scroll" id="liveScalesWrap" style="display:none;max-width:760px;margin-top:10px;">
   <table>
-    <thead><tr><th style="text-align:left;">live backtest</th><th>days</th><th>total P&amp;L</th><th>P&amp;L scale<span class="info-icon" data-tip="Multiplies this backtest's daily P&amp;L in the report. 0.5 halves it; 1 leaves it as is.">?</span></th></tr></thead>
+    <thead><tr><th style="text-align:left;">live backtest</th><th>days</th><th>total P&amp;L</th><th>P&amp;L scale<span class="info-icon" data-tip="Multiplies this backtest's daily P&amp;L in the report. 0.5 halves it; 1 leaves it as is.">?</span></th><th style="text-align:left;">margin<span class="info-icon" data-tip="Margin this backtest ran at, from its blotters and the lots &amp; trade interval reference. Halved if unwound before expiry. Includes the P&amp;L scale.">?</span></th></tr></thead>
     <tbody id="liveScalesBody"></tbody>
   </table>
   </div>
@@ -650,6 +656,9 @@ th:first-child,td:first-child{text-align:left;}
 .kv span:first-child{color:var(--text-secondary);}
 .kv span:last-child{font-variant-numeric:tabular-nums;text-align:right;}
 .scroll{overflow-x:auto;}
+.mi{width:120px;font:inherit;font-size:12.5px;text-align:right;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--page);color:var(--text-primary);font-variant-numeric:tabular-nums;}
+.btn{border:1px solid var(--border);background:var(--surface-1);color:var(--text-secondary);font:inherit;font-size:12.5px;padding:4px 10px;border-radius:6px;cursor:pointer;margin-top:8px;}
+.muted{color:var(--text-muted);}
 </style>
 </head>
 <body>
@@ -917,14 +926,99 @@ function renderBook(view, key){
   table(c3, ['Week of', 'P&L'], weeks.map(([w, v]) => [w, money(v)]), true);
   table(c4, ['Month', 'P&L'], months.map(([mo, v]) => [fmtMonth(mo), money(v)]), true);
 }
+// ---- by underlying: live and recommended books for one index, at margins you set ----
+const INDEX_NAMES = { NF: 'NIFTY', BN: 'BANKNIFTY', SN: 'SENSEX' };
+const UND = (DATA.underlying || []).map(b => Object.assign({}, b, { margin: b.base, ranAt: b.base }));
+const undIndexes = () => ['NF', 'BN', 'SN'].concat([...new Set(UND.map(b => b.index))]).filter((x, i, a) => a.indexOf(x) === i && UND.some(b => b.index === x));
+// A book's daily P&L at its current margin, on DATES. Live P&L scales by margin ÷ the margin it ran at.
+function undVals(b){
+  if(b.source === 'rec') return align(b.dates, b.perDollar.map(v => v * b.margin));
+  return align(b.dates, b.pnl.map(v => b.ranAt > 0 ? v * b.margin / b.ranAt : 0));
+}
+function renderUnderlying(view, ix){
+  const books = UND.filter(b => b.index === ix), name = INDEX_NAMES[ix] || ix;
+  const c = card(view, name + ' — books and margins',
+    'Set any book\'s margin and everything below redraws. Live P&L scales by margin ÷ "ran at"; recommended P&L by margin ÷ margin @0DTE, as in the dashboard. Margins are in dollars. Edits stay in this page only.');
+  const t = document.createElement('table'), hr = document.createElement('tr');
+  ['Book', 'Source', 'Sizing', 'Ran at ($)', 'Margin ($)', 'Total P&L'].forEach(h => { const th = document.createElement('th'); th.textContent = h; hr.appendChild(th); });
+  t.appendChild(hr);
+  const res = document.createElement('div');
+  const redraw = () => { draws = []; res.replaceChildren(); renderUndResults(res, books, name); draws.forEach(f => f()); };
+  const totals = [];
+  const showTotals = () => books.forEach((b, i) => { totals[i].textContent = money(undVals(b).reduce((a, v) => a + v, 0)); });
+  const box = (b, field) => { const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.step = 'any'; inp.className = 'mi';
+    inp.value = Math.round(b[field]); inp.dataset.book = b.name; inp.dataset.field = field;
+    inp.addEventListener('input', () => { const v = Number(inp.value); b[field] = Number.isFinite(v) && v > 0 ? v : 0; showTotals(); redraw(); });
+    return inp; };
+  books.forEach(b => {
+    const r = document.createElement('tr');
+    const td = x => { const d = document.createElement('td'); if(x instanceof Node) d.appendChild(x); else d.textContent = x; r.appendChild(d); return d; };
+    td(b.name); td(b.source === 'live' ? 'Live' : 'Recommended');
+    const s = td(b.note); s.className = 'muted'; s.style.textAlign = 'left';
+    if(b.source === 'live') td(box(b, 'ranAt')); else td('—');
+    td(box(b, 'margin')); totals.push(td(''));
+    t.appendChild(r);
+  });
+  const w = document.createElement('div'); w.className = 'scroll'; w.appendChild(t); c.appendChild(w);
+  if(books.some(b => b.source === 'live' && !(b.ranAt > 0))) { const p = document.createElement('p'); p.className = 'note'; p.textContent = 'A live book with no "ran at" margin can\'t be rescaled and counts as 0 — enter the margin it ran at.'; c.appendChild(p); }
+  const reset = document.createElement('button'); reset.className = 'btn'; reset.textContent = 'Reset to starting margins';
+  reset.addEventListener('click', () => { books.forEach(b => { b.margin = b.base; b.ranAt = b.base; }); render(); });
+  c.appendChild(reset);
+  showTotals();
+  view.appendChild(res);
+  renderUndResults(res, books, name);
+}
+function renderUndResults(view, books, name){
+  const sum = list => { const vs = list.map(undVals); return DATES.map((d, j) => vs.reduce((a, v) => a + v[j], 0)); };
+  const live = books.filter(b => b.source === 'live'), rec = books.filter(b => b.source === 'rec');
+  const L = sum(live), D = sum(rec), mL = metrics(L), mD = metrics(D);
+  const marg = list => list.reduce((a, b) => a + b.margin, 0), gL = marg(live), gD = marg(rec);
+  const lN = 'Live ' + name, dN = 'Recommended ' + name;
+  const mc = card(view, 'Metrics side by side', `Annualised on 252 trading days, risk-free 0. "Return on margin" is against each side's total margin above; other % figures are against the dashboard's total capital (${money(DATA.capital)}).`);
+  const rows = [
+    ['Total margin', null], ['Total P&L', m => money(m.total)],
+    ['Return on margin', (m, g) => g > 0 ? pct(m.total / g) : '—'], ['Return on capital', m => pct(m.roc)], ['Annualised return', m => pct(m.annual)],
+    ['Sharpe', m => ratio(m.sharpe)], ['Sortino', m => ratio(m.sortino)], ['Max drawdown', m => money(m.maxDD)],
+    ['Max drawdown % of capital', m => pct(m.maxDDPct)], ['Calmar', m => ratio(m.calmar)], ['Win rate', m => pct(m.win)],
+    ['Best day', m => money(m.best)], ['Worst day', m => money(m.worst)], ['Days with P&L', m => String(m.days)]];
+  table(mc, ['', lN, dN], rows.map(([k, f]) => k === 'Total margin' ? [k, money(gL), money(gD)] : [k, f(mL, gL), f(mD, gD)]));
+
+  const pair = [{ name: lN, short: 'Live', slot: '--s1', values: equity(L) }, { name: dN, short: 'Recommended', slot: '--s2', values: equity(D) }];
+  const c1 = card(view, 'Equity curves', 'Cumulative P&L of each side at the margins above.');
+  legend(c1, pair.map(p => ({ name: p.name, color: css(p.slot) })), 'line'); const b1 = chartBox(c1);
+  draws.push(() => lineChart(b1, pair.map(p => Object.assign(p, { color: css(p.slot) })), { height: 300 }));
+
+  const slots = ['--s1','--s2','--s3','--s4','--s5','--s6','--s7','--s8'];
+  const each = books.filter(b => b.margin > 0).slice(0, 8).map((b, i) => ({ name: (b.source === 'live' ? 'Live ' : 'Rec ') + b.name, short: b.name.split(' ').slice(-1)[0], slot: slots[i], values: equity(undVals(b)) }));
+  if(each.length){
+    const c0 = card(view, 'Equity curve of each book', 'Books with a margin above 0' + (books.filter(b => b.margin > 0).length > 8 ? ' (first 8).' : '.'));
+    legend(c0, each.map(l => ({ name: l.name, color: css(l.slot) })), 'line'); const b0 = chartBox(c0);
+    draws.push(() => lineChart(b0, each.map(l => Object.assign(l, { color: css(l.slot) })), { height: 300 }));
+  }
+
+  const bars = (title, keyFn, labelFn, opts) => {
+    const gl = group(L, keyFn), gd = group(D, keyFn);
+    const c = card(view, title, opts.note || null);
+    const sers = [{ name: lN, color: css('--s1'), values: gl.map(e => e[1]) }, { name: dN, color: css('--s2'), values: gd.map(e => e[1]) }];
+    legend(c, sers, 'box'); const b = chartBox(c);
+    draws.push(() => barChart(b, gl.map(([k]) => labelFn(k)), sers.map((s, i) => Object.assign(s, { color: css(i ? '--s2' : '--s1') })), opts));
+    table(c, [opts.col, lN, dN, 'Difference'], gl.map(([k, v], i) => [labelFn(k).title, money(v), money(gd[i][1]), money(gd[i][1] - v)]), true);
+  };
+  bars('Daily P&L', d => d, d => ({ title: fmtDate(d) + ' ' + d.slice(0, 4) }), { monthAxis: true, col: 'Date' });
+  bars('Weekly P&L', weekStart, w => ({ title: 'Week of ' + fmtDate(w) + ' ' + w.slice(0, 4), tick: fmtDate(w) }), { labelEvery: 4, col: 'Week of', note: 'Monday–Friday weeks, labelled by the Monday.' });
+  bars('Monthly P&L', d => d.slice(0, 7), m => ({ title: fmtMonth(m), tick: fmtMonth(m) }), { labelEvery: 1, height: 200, col: 'Month' });
+}
 function render(){
   const view = document.getElementById('view'); view.replaceChildren(); hideTip(); draws = [];
-  if(active === 'compare') renderCompare(view); else renderBook(view, active);
+  if(active === 'compare') renderCompare(view);
+  else if(active.startsWith('und:')) renderUnderlying(view, active.slice(4));
+  else renderBook(view, active);
   draws.forEach(f => f());
 }
 function buildTabs(){
   const host = document.getElementById('tabgroups');
   const groups = [['Comparison', [['compare', 'Live vs recommended']]],
+    ['By underlying', undIndexes().map(ix => ['und:' + ix, INDEX_NAMES[ix] || ix])],
     ['Live backtests', Object.keys(BOOKS).filter(k => k.startsWith('live:')).map(k => [k, BOOKS[k].label])],
     ['Dashboard recommendation', Object.keys(BOOKS).filter(k => k.startsWith('dash:')).map(k => [k, BOOKS[k].label])]];
   groups.forEach(([gname, tabs]) => {
@@ -979,7 +1073,13 @@ const DEFAULTS = {
   sizingRows: ['NF|weekly','NF|monthly','BN|weekly','BN|monthly','SN|weekly','SN|monthly'], // reference rows shown
   liveUsdInr: 95.2,  // rupees per $1 for the live-comparison report
   liveBook: null,    // { folder, backtests: { name: { 'YYYY-MM-DD': daily P&L in rupees } } }
-  liveScales: {}     // { backtest name: multiplier on its daily P&L } — 1 when absent
+  liveScales: {},    // { backtest name: multiplier on its daily P&L } — 1 when absent
+  liveInfo: {},      // { backtest name: { type, early, days: { mon: { size, intervalSec } } } } read from the blotters
+  liveRule: {       // per index: `unit` contracts every `intervalSec` seconds, held to expiry, needs `margin` dollars
+    NF: { unit: 260, intervalSec: 300, margin: 1200000 },
+    BN: { unit: 0, intervalSec: 0, margin: 0 },
+    SN: { unit: 40, intervalSec: 180, margin: 1000000 }
+  }
 };
 let state = JSON.parse(JSON.stringify(DEFAULTS));
 let lastOptimalScales = null; // per-strategy scale factors from the last successful solve; invalidated on any edit
@@ -1500,6 +1600,81 @@ async function readLiveFolder(files){
   }
   return { folder, backtests };
 }
+
+// Each live backtest's sizing, from its blotters and tradelib_global_constants.py:
+// per entry weekday, the usual position size and gap between entries ('trade' rows),
+// and whether positions are unwound before expiry (unwind_trading_days_before > 0).
+const mode = arr => { const c = new Map(); arr.forEach(v => c.set(v, (c.get(v) || 0) + 1)); let best = null, n = 0; c.forEach((k, v) => { if(k > n){ n = k; best = v; } }); return best; };
+async function readLiveInfo(files){
+  const groups = {};
+  Array.from(files).forEach(f => {
+    const p = f.webkitRelativePath || f.name;
+    if(p.includes('__MACOSX')) return;
+    let m = p.match(/(?:^|\/)([^\/]+)\/([^\/]+)\/blotter\/[^\/]*?(\d{8})\d*_[^\/]*\.csv$/);
+    if(m){ const g = groups[m[1] + ' ' + m[2]] = groups[m[1] + ' ' + m[2]] || { blotters: [] }; g.blotters.push({ date: m[3], file: f }); return; }
+    m = p.match(/(?:^|\/)([^\/]+)\/([^\/]+)\/tradelib_global_constants\.py$/);
+    if(m){ const g = groups[m[1] + ' ' + m[2]] = groups[m[1] + ' ' + m[2]] || { blotters: [] }; g.config = f; }
+  });
+  const info = {};
+  for(const [name, g] of Object.entries(groups)){
+    if(!g.blotters.length) continue;
+    const perDay = {}; // weekday -> [{ size, intervalSec }]
+    for(const b of g.blotters){
+      const lines = (await b.file.text()).split(/\r?\n/);
+      const head = lines[0].split(',').map(h => h.trim());
+      const cT = head.indexOf('timestamp'), cP = head.indexOf('position'), cS = head.indexOf('trade_sub_type');
+      if(cT < 0 || cP < 0 || cS < 0) continue;
+      const sizes = [], times = new Set();
+      for(let i = 1; i < lines.length; i++){
+        const f = lines[i].split(','); // these columns come before the quoted instrument_object
+        if(f.length <= cS || f[cS].trim() !== 'trade') continue;
+        sizes.push(Math.abs(Number(f[cP]))); times.add(f[cT].trim());
+      }
+      if(!sizes.length) continue;
+      const t = [...times].map(s => Date.parse(s.replace(' ', 'T'))).filter(Number.isFinite).sort((a, b) => a - b);
+      const gap = mode(t.slice(1).map((v, i) => Math.round((v - t[i]) / 1000)));
+      const wd = WEEKDAYS[(new Date(+b.date.slice(0,4), +b.date.slice(4,6) - 1, +b.date.slice(6)).getDay() + 6) % 7];
+      if(!wd) continue;
+      (perDay[wd] = perDay[wd] || []).push({ size: mode(sizes), intervalSec: gap });
+    }
+    const days = {};
+    Object.entries(perDay).forEach(([wd, list]) => {
+      const key = mode(list.map(o => o.size + '|' + o.intervalSec)).split('|');
+      days[wd] = { size: Number(key[0]), intervalSec: key[1] === 'null' ? null : Number(key[1]) };
+    });
+    let early = null, type = 'weekly';
+    if(g.config){
+      const txt = await g.config.text();
+      const u = txt.match(/^unwind_trading_days_before\s*=\s*(\d+)/m); if(u) early = Number(u[1]) > 0;
+      const e = txt.match(/^expiry_type\s*=\s*['"](\w+)['"]/m); if(e && e[1] === 'monthly') type = 'monthly';
+    }
+    info[name] = { type, early, days };
+  }
+  return info;
+}
+// Index code of a live backtest from its folder name ("NIFTY 1_30200_static16" -> NF).
+function liveIndexOf(name){
+  const u = name.split(' ')[0].toUpperCase();
+  return u.startsWith('BANKNIFTY') ? 'BN' : u.startsWith('NIFTY') ? 'NF' : u.startsWith('SENSEX') ? 'SN' : null;
+}
+// Margin a live backtest ran at, by the live margin rule for its index: each entry weekday
+// needs rule margin × (size ÷ rule unit) × (rule interval ÷ interval), halved when unwound
+// before expiry; the backtest's margin is the sum over weekdays.
+const LIVE_INDEX_NAMES = { NF: 'NIFTY', BN: 'BANKNIFTY', SN: 'SENSEX' };
+function liveMarginOf(name){
+  const inf = state.liveInfo && state.liveInfo[name], idx = liveIndexOf(name);
+  if(!state.liveInfo || !Object.keys(state.liveInfo).length) return { note: 'choose the folder again to read blotters' };
+  if(!inf || !Object.keys(inf.days).length) return { note: 'no blotters found for this backtest' };
+  if(!idx) return { note: 'index not recognised' };
+  const ref = (state.liveRule || {})[idx] || {};
+  if(!(ref.unit > 0) || !(ref.intervalSec > 0) || !(ref.margin > 0)) return { note: 'set the ' + LIVE_INDEX_NAMES[idx] + ' live margin rule' };
+  const parts = WEEKDAYS.filter(wd => inf.days[wd]).map(wd => {
+    const d = inf.days[wd];
+    const m = d.intervalSec > 0 ? ref.margin * (d.size / ref.unit) * (ref.intervalSec / d.intervalSec) * (inf.early ? 0.5 : 1) : 0;
+    return { wd, size: d.size, intervalSec: d.intervalSec, margin: m };
+  });
+  return { margin: parts.reduce((a, p) => a + p.margin, 0), parts, early: inf.early };
+}
 document.getElementById('liveFolder').addEventListener('change', async e => {
   const status = document.getElementById('liveStatus');
   if(!e.target.files.length) return;
@@ -1507,7 +1682,7 @@ document.getElementById('liveFolder').addEventListener('change', async e => {
   try{
     const book = await readLiveFolder(e.target.files);
     if(!Object.keys(book.backtests).length){ showToast('No consolidated_store CSVs found in that folder.', true); state.liveBook = null; }
-    else state.liveBook = book;
+    else{ state.liveBook = book; state.liveInfo = await readLiveInfo(e.target.files); }
     saveStateKeepSolve();
   }catch(err){ console.error(err); showToast('Could not read the folder: ' + err.message, true); }
   e.target.value = '';
@@ -1529,7 +1704,33 @@ function recommendedBook(){
 }
 
 const liveScaleOf = name => { const k = state.liveScales && state.liveScales[name]; return (k === undefined || k === null || k === '') ? 1 : num(k); };
-function renderLive(){
+function renderLiveRule(){
+  document.getElementById('liveRuleMarginLabel').textContent = 'margin (' + unitSym() + ')';
+  const tbody = document.getElementById('liveRuleBody');
+  tbody.innerHTML = '';
+  ['NF', 'BN', 'SN'].forEach(idx => {
+    const rule = (state.liveRule || {})[idx] || {};
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td'); td0.style.textAlign = 'left'; td0.textContent = LIVE_INDEX_NAMES[idx]; tr.appendChild(td0);
+    [['unit', rule.unit], ['intervalSec', rule.intervalSec], ['margin', rule.margin]].forEach(([field, val]) => {
+      const td = document.createElement('td'), inp = document.createElement('input');
+      inp.className = 'units-cell'; inp.style.width = '90px'; inp.type = 'number'; inp.min = '0'; inp.step = 'any';
+      inp.placeholder = '—'; inp.dataset.field = 'rule-' + field; inp.dataset.key = idx;
+      inp.value = val ? (field === 'margin' ? toDisplay(val) : val) : '';
+      inp.addEventListener('input', e => {
+        let v = nonNegativeInput(e.target, { unit: 'Unit size', intervalSec: 'Interval', margin: 'Margin' }[field]);
+        if(field === 'margin') v = fromDisplay(v);
+        state.liveRule = Object.assign({}, state.liveRule, { [idx]: Object.assign({}, rule, (state.liveRule || {})[idx], { [field]: v }) });
+        saveStateKeepSolve();
+        renderLive(true); // keep this box focused
+      });
+      td.appendChild(inp); tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+}
+function renderLive(keepRule){
+  if(!keepRule) renderLiveRule();
   const status = document.getElementById('liveStatus');
   const btn = document.getElementById('liveReportBtn');
   const msg = document.getElementById('liveReportMsg');
@@ -1547,7 +1748,12 @@ function renderLive(){
       const raw = Object.values(p).reduce((a, b) => a + b, 0);
       cell(n, true); cell(String(Object.keys(p).length));
       const totCell = cell('');
-      const showTotal = () => { totCell.textContent = rate > 0 ? fmt(raw * liveScaleOf(n) / rate) : '—'; };
+      let marginCell = null;
+      const showTotal = () => {
+        totCell.textContent = rate > 0 ? fmt(raw * liveScaleOf(n) / rate) : '—';
+        if(marginCell){ const lm = liveMarginOf(n);
+          marginCell.textContent = lm.note ? lm.note : fmt(lm.margin * liveScaleOf(n)) + ' (' + lm.parts.map(p => p.wd[0].toUpperCase() + p.wd.slice(1) + ' ' + fmt(p.margin)).join(' + ') + (lm.early ? ', unwound early' : '') + ')'; }
+      };
       showTotal();
       const td = document.createElement('td');
       const inp = document.createElement('input');
@@ -1560,6 +1766,7 @@ function renderLive(){
       });
       inp.addEventListener('change', e => { if(e.target.value === '') { e.target.value = 1; state.liveScales[n] = 1; saveStateKeepSolve(); showTotal(); } });
       td.appendChild(inp); tr.appendChild(td);
+      marginCell = cell('', true); showTotal();
       tbody.appendChild(tr);
     });
   }else{ status.textContent = 'No live folder loaded yet.'; wrap.style.display = 'none'; }
@@ -1571,6 +1778,28 @@ function renderLive(){
   btn.disabled = !!why;
   btn.style.opacity = why ? 0.5 : 1;
   msg.textContent = why;
+}
+
+// Books for the report's by-underlying tabs. Each carries its daily P&L per $1 of margin
+// (`perDollar`) and the margin it starts at, so the report can rescale it to any margin.
+// Live: the report's live series ÷ the margin the backtest ran at (× its P&L scale).
+// Recommended: daily_pnl ÷ margin @0DTE, starting at the solved peak-day margin — the same
+// scaling as the performance section. Every strategy with daily P&L is listed, solved or not.
+function underlyingBooks(liveDates, liveSeries, recDates){
+  const books = [];
+  Object.keys(state.liveBook.backtests).forEach(n => {
+    const k = liveScaleOf(n), label = k === 1 ? n : n + ' (× ' + k + ')', lm = liveMarginOf(n);
+    const base = lm.note ? 0 : lm.margin * k;
+    books.push({ source: 'live', index: liveIndexOf(n) || '?', name: label, dates: liveDates, pnl: liveSeries[label], base,
+      note: lm.note || lm.parts.map(p => p.wd[0].toUpperCase() + p.wd.slice(1) + ' ' + p.size + ' @ ' + p.intervalSec + 's').join(', ') + (lm.early ? ', unwound early (½)' : ', held to expiry') });
+  });
+  state.strategies.forEach((s, i) => {
+    if(!s.dailyPnl || !Object.keys(s.dailyPnl).length || !(num(s.margin0DTE) > 0)) return;
+    const m0 = num(s.margin0DTE);
+    books.push({ source: 'rec', index: s.index, name: s.name, dates: recDates, base: pnlScaleOf(s, i) * m0,
+      perDollar: recDates.map(d => (s.dailyPnl[d] || 0) / m0), note: 'lots ' + s.lotString + ', margin @0DTE ' + fmt(m0) });
+  });
+  return books;
 }
 
 function buildLiveReport(){
@@ -1610,7 +1839,8 @@ function buildLiveReport(){
     usdInr: rate, capital: cap, liveFolder: lb.folder, config,
     strategiesTable: { headers: ['strategy', 'index', 'type', 'margin @0DTE', 'lots', 'min $/strat', 'max $/strat', 'solved dial', 'P&L scale', 'peak-day margin'], rows: stratRows },
     live: { dates: liveDates, series: liveSeries, combined: liveCombined },
-    dash: { dates: rec.dates, series: rec.series, combined: rec.combined }
+    dash: { dates: rec.dates, series: rec.series, combined: rec.combined },
+    underlying: underlyingBooks(liveDates, liveSeries, rec.dates)
   };
   const html = document.getElementById('liveReportTpl').textContent
     .replace(/<\\\/script>/g, '</' + 'script>')

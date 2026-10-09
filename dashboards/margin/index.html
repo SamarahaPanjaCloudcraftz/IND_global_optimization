@@ -6,6 +6,8 @@
 <title>Margin Allocation Desk</title>
 <script src="https://cdn.jsdelivr.net/npm/javascript-lp-solver@1.0.3/dist/solver.global.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- ExcelJS writes the styled allocation workbook (SheetJS community can't write fills or borders) -->
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <style>
 :root{
   --bg:#0e1117; --panel:#151a23; --panel-2:#1b212c; --line:#252c38;
@@ -190,20 +192,25 @@ th .info-icon{margin-left:4px;}
 
 footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
 
-/* ---- expiry-day cells in the "margin by strategy and day" report: hue by index,
-   strength by weekly (light) vs monthly (strong). ---- */
-.t-nf-w{--tone:var(--nf);--cell-pct:32%;}
-.t-nf-m{--tone:var(--nf);--cell-pct:58%;}
-.t-bn-w{--tone:var(--bn);--cell-pct:32%;}
-.t-bn-m{--tone:var(--bn);--cell-pct:58%;}
-.t-sn-w{--tone:var(--sn);--cell-pct:32%;}
-.t-sn-m{--tone:var(--sn);--cell-pct:58%;}
-/* only the expiry cell is filled; ID-scoped so the row-hover rule doesn't wash it out */
+/* ---- expiry-day cells in the "margin by strategy and day" report: outlined, hue by
+   index, thickness by weekly (thin) vs monthly (thick). The fill is left for the
+   sell / unwind highlight below. ---- */
+.t-nf-w{--tone:var(--nf);--ring:2px;}
+.t-nf-m{--tone:var(--nf);--ring:3px;}
+.t-bn-w{--tone:var(--bn);--ring:2px;}
+.t-bn-m{--tone:var(--bn);--ring:3px;}
+.t-sn-w{--tone:var(--sn);--ring:2px;}
+.t-sn-m{--tone:var(--sn);--ring:3px;}
 .perf-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:12px;}
 .perf-cards .value{font-size:17px;}
 .perf-cards .sub{font-size:11px;color:var(--text-dim);margin-top:2px;font-family:var(--mono);}
 .perf-period{font-size:11.5px;color:var(--text-dim);margin-bottom:10px;}
-#weekTypeReportBody td.expiry-cell{background:color-mix(in srgb, var(--tone) var(--cell-pct), var(--panel));font-weight:700;}
+/* ID-scoped so the row-hover rule doesn't wash these out */
+#weekTypeReportBody td.expiry-cell{box-shadow:inset 0 0 0 var(--ring) var(--tone);font-weight:700;}
+/* sell day green, unwind day red; both on one day = half green, half red */
+#weekTypeReportBody td.trade-sell{background:color-mix(in srgb, var(--good) 40%, var(--panel));}
+#weekTypeReportBody td.trade-unwind{background:color-mix(in srgb, var(--bad) 40%, var(--panel));}
+#weekTypeReportBody td.trade-both{background:linear-gradient(90deg, color-mix(in srgb, var(--good) 40%, var(--panel)) 50%, color-mix(in srgb, var(--bad) 40%, var(--panel)) 50%);}
 
 
 </style>
@@ -347,8 +354,8 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
   <h2 style="gap:10px;">
     <span style="flex:1;">strategies</span>
     <div class="segmented" style="margin-left:auto;">
-      <button class="seg-btn active" id="marginModeDteBtn" data-mode="dte">Derive from DTE curve</button>
-      <button class="seg-btn" id="marginModeHalfBtn" data-mode="half">Expiry 0DTE, other days ½</button>
+      <button class="seg-btn" id="marginModeDteBtn" data-mode="dte">Derive from DTE curve</button>
+      <button class="seg-btn active" id="marginModeHalfBtn" data-mode="half">Expiry 0DTE, other days ½</button>
       <button class="seg-btn" id="marginModeIndepBtn" data-mode="independent">Independent by weekday</button>
     </div>
     <span class="info-icon" data-tip="DTE curve: margin @0DTE grows with days to expiry, and doubles on expiry day. Expiry 0DTE, other days ½: margin @0DTE on expiry day, half of it on every other day. Independent: type each weekday's margin directly. All per lot, × lots that day. Switching keeps every mode's numbers.">?</span>
@@ -393,7 +400,7 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
 <div class="panel" id="weekTypeReportPanel">
   <h2 style="gap:10px;">
     <span style="flex:1;">margin by strategy and day
-      <span class="info-icon" data-tip="Shows margin broken out per strategy, plus the total and utilization across all of them. Under monthly horizon, every ordinary week looks the same, so use the toggle to switch between an ordinary week and the one expiry week instead of scrolling through 20 separate weeks.">?</span>
+      <span class="info-icon" data-tip="Shows margin broken out per strategy, plus the total and utilization across all of them. Under monthly horizon, every ordinary week looks the same, so use the toggle to switch between an ordinary week and the one expiry week instead of scrolling through 20 separate weeks. For each deployed strategy, green = sell day (position opened), red = unwind day (position closed), half green / half red = both on the same day; the outlined cell is the expiry day.">?</span>
     </span>
     <div id="weekTypeToggle" class="segmented" style="display:none;margin-left:auto;">
       <button class="seg-btn active" id="weekTypeNonExpBtn" data-weektype="nonexp">Non-expiry week</button>
@@ -411,6 +418,10 @@ footer{text-align:center;color:var(--text-dim);font-size:11px;margin-top:36px;}
     <thead><tr><th style="text-align:left;">strategy / metric</th><th>mon</th><th>tue</th><th>wed</th><th>thu</th><th>fri</th></tr></thead>
     <tbody id="weekTypeReportBody"></tbody>
   </table>
+  </div>
+  <div class="table-actions">
+    <button class="add-row-btn" id="allocXlsxBtn">⭳ download allocation workbook (.xlsx)</button>
+    <span class="info-icon" data-tip="Solves all three objectives with your current capital, limits, horizon, λ and margin mode, and saves one Excel file: a summary comparing them, then each objective's allocation table (same colours as here) with its P&amp;L summary. Doesn't change the solve shown on screen.">?</span>
   </div>
 </div>
 
@@ -1055,7 +1066,7 @@ const WEEKDAYS = ['mon','tue','wed','thu','fri'];
 
 const DEFAULTS = {
   horizon: 'weekly',
-  marginInputMode: 'dte', // 'dte' | 'half' | 'independent'
+  marginInputMode: 'half', // 'dte' | 'half' | 'independent'
   objective: 'total',
   strategies: [],
   totalCapital: 10000000,
@@ -1174,6 +1185,31 @@ function expiryColFor(strat, weekNum){
   if(!toneClass(strat)) return -1;
   if(strat.type === 'monthly' && weekNum !== monthlyExpiryWeek()) return -1;
   return WEEKDAYS.indexOf(expiryDayFor(strat.index));
+}
+// Columns (0 = mon … 4 = fri) where a strategy opens (sell) and closes (unwind) its
+// position, read from the weekdays it holds lots (or, in Independent mode, has
+// margin). The week is read as a loop — a position held on Friday carries into
+// Monday — so "11011" is one Thu→Tue position, not two. sell = held day whose
+// previous day isn't held; unwind = held day whose next day isn't held. With no
+// gap at all ("11111") the edges can't be seen, so it unwinds on expiry and sells
+// the day after.
+function tradeDayCols(strat){
+  const held = WEEKDAYS.map(wd => state.marginInputMode === 'independent'
+    ? num(strat.indepMargins && strat.indepMargins[wd]) > 0
+    : lotsForWeekday(strat, wd) > 0);
+  const sell = [], unwind = [];
+  if(!held.some(Boolean)) return { sell, unwind };
+  if(held.every(Boolean)){
+    const e = WEEKDAYS.indexOf(expiryDayFor(strat.index));
+    if(e >= 0){ sell.push((e + 1) % 5); unwind.push(e); }
+    return { sell, unwind };
+  }
+  held.forEach((h, d) => {
+    if(!h) return;
+    if(!held[(d + 4) % 5]) sell.push(d);
+    if(!held[(d + 1) % 5]) unwind.push(d);
+  });
+  return { sell, unwind };
 }
 
 // ---- day-slot handling ----
@@ -1327,6 +1363,8 @@ document.getElementById('objMaximinBtn').addEventListener('click', ()=>{ state.o
 document.getElementById('objRiskBtn').addEventListener('click', ()=>{ state.objective='riskadj'; saveState(); refreshObjectiveUI(); render(); renderFormulation(); });
 
 const MARGIN_MODE_BTNS = { dte: 'marginModeDteBtn', half: 'marginModeHalfBtn', independent: 'marginModeIndepBtn' };
+const MARGIN_MODE_LABELS = { dte: 'Derive from DTE curve', half: 'Expiry 0DTE, other days ½', independent: 'Independent by weekday' };
+const OBJECTIVE_LABELS = { total: 'Total utilization', maximin: 'Worst-day utilization', riskadj: 'Risk-adjusted return' };
 function refreshMarginModeButtons(){
   Object.entries(MARGIN_MODE_BTNS).forEach(([mode, id]) => document.getElementById(id).classList.toggle('active', state.marginInputMode === mode));
 }
@@ -1492,8 +1530,20 @@ function pnlMetrics(values, cap){
 // up on its heaviest day, relative to the margin the daily_pnl was earned on.
 // Shared by the performance section and the live-comparison report.
 function pnlScaleOf(strat, i){
-  const dial = lastOptimalScales ? (lastOptimalScales[i] || 0) : 0;
+  return pnlScaleFor(strat, lastOptimalScales ? (lastOptimalScales[i] || 0) : 0);
+}
+function pnlScaleFor(strat, dial){
   return num(strat.margin0DTE) > 0 ? dial * peakUnitMargin(strat) / num(strat.margin0DTE) : 0;
+}
+// Every strategy's daily P&L scaled by its dial in `dials`, on the union of dates
+// (missing day = 0), plus the portfolio sum. series[i] is null without daily P&L.
+function scaledPnl(dials){
+  const withPnl = state.strategies.filter(s => s.dailyPnl && Object.keys(s.dailyPnl).length);
+  const dates = [...new Set(withPnl.flatMap(s => Object.keys(s.dailyPnl)))].sort();
+  const series = state.strategies.map((s, i) => s.dailyPnl
+    ? dates.map(d => pnlScaleFor(s, dials[i] || 0) * (s.dailyPnl[d] || 0)) : null);
+  const portfolio = dates.map((d, j) => series.reduce((a, v) => a + (v ? v[j] : 0), 0));
+  return { dates, series, portfolio };
 }
 function renderPerformance(){
   const emptyMsg = document.getElementById('perfEmptyMsg');
@@ -1509,12 +1559,9 @@ function renderPerformance(){
   if(why) return;
 
   const cap = num(document.getElementById('totalCapital').value);
-  const dates = [...new Set(withPnl.flatMap(s => Object.keys(s.dailyPnl)))].sort();
+  const { dates, series, portfolio } = scaledPnl(lastOptimalScales);
   const dialOf = i => lastOptimalScales[i] || 0;
   const pnlScale = pnlScaleOf;
-  const scaled = (s, i) => dates.map(d => pnlScale(s, i) * (s.dailyPnl && s.dailyPnl[d] || 0)); // missing day = 0
-  const portfolio = dates.map(() => 0);
-  state.strategies.forEach((s, i) => { if(s.dailyPnl) scaled(s, i).forEach((v, j) => { portfolio[j] += v; }); });
   const m = pnlMetrics(portfolio, cap);
 
   const pct = v => v === null ? '—' : (v*100).toFixed(1) + '%';
@@ -1554,7 +1601,7 @@ function renderPerformance(){
     else if(dialOf(i) <= 0){ cell('not run'); for(let k=0;k<5;k++) cell('—'); }
     else if(!(num(s.margin0DTE) > 0)){ cell('no margin @0DTE'); for(let k=0;k<5;k++) cell('—'); }
     else{
-      const sm = pnlMetrics(scaled(s, i), cap);
+      const sm = pnlMetrics(series[i], cap);
       cell(money(sm.total));
       cell(m.total !== 0 ? (sm.total/m.total*100).toFixed(1) + '%' : '—');
       cell(ratio(sm.sharpe));
@@ -1814,8 +1861,8 @@ function buildLiveReport(){
   const liveCombined = liveDates.map((d, j) => Object.values(liveSeries).reduce((a, v) => a + v[j], 0));
   const v = id => document.getElementById(id).value;
   const lim = (mn, mx) => (num(v(mn)) > 0 ? fmt(num(v(mn))) : 'none') + ' / ' + (num(v(mx)) > 0 ? fmt(num(v(mx))) : 'none');
-  const objLabel = { total: 'Total utilization', maximin: 'Worst-day utilization', riskadj: 'Risk-adjusted return' }[state.objective];
-  const modeLabel = { dte: 'Derive from DTE curve', half: 'Expiry 0DTE, other days ½', independent: 'Independent by weekday' }[state.marginInputMode];
+  const objLabel = OBJECTIVE_LABELS[state.objective];
+  const modeLabel = MARGIN_MODE_LABELS[state.marginInputMode];
   const config = [
     ['Objective', objLabel + (state.objective === 'riskadj' ? ' (λ = ' + v('riskLambda') + ')' : '')],
     ['Objective value', document.getElementById('objValue').textContent],
@@ -2028,12 +2075,25 @@ function renderWeekTypeReport(cap){
   emptyMsg.style.display = 'none';
   tableWrap.style.display = 'block';
 
-  // opts.expiryCol: column to colour as the expiry day; opts.tone: its colour class
+  // opts.expiryCol: column to outline as the expiry day; opts.tone: its colour class;
+  // opts.trade: { sell, unwind } columns to fill green / red (deployed strategies only)
   function marginRow(label, values, bold, opts){
     opts = opts || {};
+    const trade = opts.trade || { sell: [], unwind: [] };
     return `<tr${bold?' class="total-row"':''}><td style="text-align:left;">${label}</td>`+
-      values.map((v,di)=>`<td${di === opts.expiryCol ? ' class="expiry-cell '+opts.tone+'" title="expiry day"' : ''}>${fmtNum(v)}</td>`).join('')+`</tr>`;
+      values.map((v,di)=>{
+        const cls = [], tips = [];
+        const isSell = trade.sell.includes(di), isUnwind = trade.unwind.includes(di);
+        if(isSell && isUnwind){ cls.push('trade-both'); tips.push('sell & unwind day'); }
+        else if(isSell){ cls.push('trade-sell'); tips.push('sell day'); }
+        else if(isUnwind){ cls.push('trade-unwind'); tips.push('unwind day'); }
+        if(di === opts.expiryCol){ cls.push('expiry-cell', opts.tone); tips.push('expiry day'); }
+        const attrs = cls.length ? ` class="${cls.join(' ')}" title="${tips.join(' · ')}"` : '';
+        return `<td${attrs}>${fmtNum(v)}</td>`;
+      }).join('')+`</tr>`;
   }
+  // highlight sell / unwind only for strategies actually deployed in this view
+  const tradeFor = (strat, scale) => (scale !== null && scale > 1e-9) ? tradeDayCols(strat) : null;
   function utilRowHtml(label, values){
     return `<tr class="util-row"><td style="text-align:left;">${label}</td>`+
       values.map(v=>{
@@ -2053,7 +2113,7 @@ function renderWeekTypeReport(cap){
         totals[di]+=v;
         return v;
       });
-      html += marginRow(strat.name, values, false, { tone: toneClass(strat), expiryCol: expiryColFor(strat, 1) });
+      html += marginRow(strat.name, values, false, { tone: toneClass(strat), expiryCol: expiryColFor(strat, 1), trade: tradeFor(strat, scale) });
     });
     html += marginRow('TOTAL', totals, true);
     html += utilRowHtml('UTILIZATION', totals);
@@ -2069,7 +2129,7 @@ function renderWeekTypeReport(cap){
         totals[di]+=v;
         return v;
       });
-      html += marginRow(strat.name, values, false, { tone: toneClass(strat), expiryCol: expiryColFor(strat, weekNum) });
+      html += marginRow(strat.name, values, false, { tone: toneClass(strat), expiryCol: expiryColFor(strat, weekNum), trade: tradeFor(strat, scale) });
     });
     html += marginRow('TOTAL', totals, true);
     html += utilRowHtml('UTILIZATION', totals);
@@ -2093,6 +2153,230 @@ document.getElementById('weekTypeExpBtn').addEventListener('click', ()=>{
 
 document.getElementById('reportMode').addEventListener('change', ()=>{
   renderTotals();
+});
+
+// ---------- ALLOCATION WORKBOOK (.xlsx) ----------
+// Solves each objective with the current inputs and writes one styled workbook: a
+// summary comparing the three, then a sheet per objective with the allocation table
+// (sell / unwind / expiry marked as on screen) and its P&L summary. The on-screen
+// solve is left as it is. Colours are the light theme's, since Excel is white.
+const XL_COLORS = { good: '2F8F5C', bad: 'B53347', NF: '2F6FA8', BN: '7A4FC0', SN: 'B8741A', head: 'F1EFE9', line: 'D9D6CC', dim: '6B6B63', util: '5B9DD9' };
+const XL_FMT = { money: '$#,##0;-$#,##0', pct: '0.0%', ratio: '0.00' };
+const XL_METRICS = [
+  ['Total P&L', 'total', 'money'], ['Return on capital', 'roc', 'pct'], ['Annualised return', 'annual', 'pct'],
+  ['Sharpe', 'sharpe', 'ratio'], ['Sortino', 'sortino', 'ratio'], ['Max drawdown', 'maxDD', 'money'],
+  ['Max drawdown % of capital', 'maxDDPct', 'pct'], ['Calmar', 'calmar', 'ratio'], ['Win rate', 'winRate', 'pct'],
+  ['Best day', 'best', 'money'], ['Worst day', 'worst', 'money']
+];
+const argb = hex => 'FF' + hex;
+// hex colour mixed with white, `p` = share of the colour (matches the dashboard's 40% tint)
+function xlTint(hex, p){
+  const c = [0, 2, 4].map(k => parseInt(hex.slice(k, k + 2), 16));
+  return argb(c.map(v => Math.round(255 + p * (v - 255)).toString(16).padStart(2, '0')).join('').toUpperCase());
+}
+const XL_FILL = {
+  sell: { type: 'pattern', pattern: 'solid', fgColor: { argb: xlTint(XL_COLORS.good, 0.4) } },
+  unwind: { type: 'pattern', pattern: 'solid', fgColor: { argb: xlTint(XL_COLORS.bad, 0.4) } },
+  // Excel can't split a cell; a gradient that switches colour at the middle looks the same
+  both: { type: 'gradient', gradient: 'angle', degree: 0, stops: [
+    { position: 0, color: { argb: xlTint(XL_COLORS.good, 0.4) } }, { position: 0.499, color: { argb: xlTint(XL_COLORS.good, 0.4) } },
+    { position: 0.501, color: { argb: xlTint(XL_COLORS.bad, 0.4) } }, { position: 1, color: { argb: xlTint(XL_COLORS.bad, 0.4) } }] },
+  head: { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(XL_COLORS.head) } }
+};
+// value with its number format; null shows as a dash, like the dashboard
+function xlPut(cell, v, kind){
+  if(v === null || v === undefined || (typeof v === 'number' && !Number.isFinite(v))){ cell.value = '—'; cell.alignment = { horizontal: 'right' }; return; }
+  cell.value = v;
+  if(kind) cell.numFmt = XL_FMT[kind];
+}
+function xlHeader(ws, r, labels){
+  labels.forEach((t, k) => {
+    const c = ws.getCell(r, k + 1);
+    c.value = t; c.font = { bold: true, color: { argb: argb(XL_COLORS.dim) } }; c.fill = XL_FILL.head;
+    c.alignment = { horizontal: k ? 'right' : 'left' };
+    c.border = { bottom: { style: 'thin', color: { argb: argb(XL_COLORS.line) } } };
+  });
+}
+function xlTitle(ws, r, text, size){ const c = ws.getCell(r, 1); c.value = text; c.font = { bold: true, size: size || 12 }; }
+
+// One objective's solve and everything the workbook shows for it.
+function allocationFor(objective, cap){
+  const { result } = buildAndSolve(objective);
+  const res = { objective, label: OBJECTIVE_LABELS[objective] };
+  if(!result.feasible){ res.status = 'infeasible'; return res; }
+  if(result.bounded === false){ res.status = 'unbounded'; return res; }
+  res.status = 'optimal';
+  res.dials = state.strategies.map((s, i) => result['x' + i] || 0);
+  res.objValue = objective === 'maximin' ? (result.z !== undefined ? result.z : null) : result.result;
+  const slots = getSlots();
+  res.avgUtil = cap > 0 ? slots.reduce((a, sl) => a + state.strategies.reduce((b, s, i) => b + unitMargin(s, sl) * res.dials[i], 0) / cap, 0) / slots.length : null;
+  res.peak = state.strategies.map((s, i) => res.dials[i] * peakUnitMargin(s));
+  res.book = scaledPnl(res.dials);
+  res.metrics = res.book.dates.length ? pnlMetrics(res.book.portfolio, cap) : null;
+  return res;
+}
+
+// Weeks the allocation table shows: under monthly horizon with a monthly strategy, the
+// non-expiry and expiry weeks differ, so both; otherwise every week is the same, so one.
+function allocationWeeks(){
+  const expWeek = monthlyExpiryWeek(), nonExp = expWeek === 1 ? 2 : 1;
+  if(state.horizon === 'monthly' && hasMonthlyStrategy()) return [['Non-expiry week', nonExp], ['Expiry week (wk ' + expWeek + ')', expWeek]];
+  return [[null, state.horizon === 'weekly' ? 1 : nonExp]];
+}
+const slotOf = (wd, weekNum) => state.horizon === 'weekly' ? wd : 'w' + weekNum + '_' + wd;
+
+function addSummarySheet(wb, results, cap){
+  const ws = wb.addWorksheet('Summary', { views: [{ showGridLines: false }] });
+  ws.columns = [{ width: 30 }, { width: 22 }, { width: 22 }, { width: 22 }, { width: 22 }];
+  const v = id => document.getElementById(id).value;
+  const lim = (mn, mx) => (num(v(mn)) > 0 ? fmt(num(v(mn))) : 'none') + ' / ' + (num(v(mx)) > 0 ? fmt(num(v(mx))) : 'none');
+  let r = 1;
+  xlTitle(ws, r++, 'Margin allocation — three objectives', 14);
+  ws.getCell(r++, 1).value = 'Generated ' + new Date().toLocaleString('en-GB');
+  r++;
+  xlTitle(ws, r++, 'Settings');
+  [
+    ['Margin mode', MARGIN_MODE_LABELS[state.marginInputMode] + (state.marginInputMode === 'dte' ? ' (c = ' + v('offsetC') + ', exponent = ' + v('exponent') + ')' : '')],
+    ['Horizon', state.horizon === 'monthly' ? 'Monthly (expiry week ' + v('monthlyExpiryWeek') + ')' : 'Weekly'],
+    ['Total margin capital', cap, 'money'],
+    ['Min margin used — total', num(v('minTotalMargin')) > 0 ? num(v('minTotalMargin')) : 'none', 'money'],
+    ['NF min / max', lim('minNF', 'capNF')], ['BN min / max', lim('minBN', 'capBN')], ['SN min / max', lim('minSN', 'capSN')],
+    ['Expiry weekdays', 'NF ' + v('nfExpiry') + ', BN ' + v('bnExpiry') + ', SN ' + v('snExpiry')],
+    ['Risk aversion λ (risk-adjusted only)', num(v('riskLambda'))]
+  ].forEach(([k, val, kind]) => { ws.getCell(r, 1).value = k; xlPut(ws.getCell(r, 2), val, typeof val === 'number' ? kind : null); ws.getCell(r, 2).alignment = { horizontal: 'right' }; r++; });
+  r++;
+
+  xlTitle(ws, r++, 'Results');
+  xlHeader(ws, r++, [''].concat(results.map(x => x.label)));
+  const rowOf = (label, fn) => { ws.getCell(r, 1).value = label; results.forEach((x, k) => fn(ws.getCell(r, k + 2), x)); r++; };
+  rowOf('Status', (c, x) => { c.value = x.status; c.alignment = { horizontal: 'right' }; c.font = { color: { argb: argb(x.status === 'optimal' ? XL_COLORS.good : XL_COLORS.bad) } }; });
+  rowOf('Objective value', (c, x) => xlPut(c, x.status === 'optimal' ? x.objValue : null, x.objective === 'maximin' ? 'pct' : 'money'));
+  rowOf('Average utilization', (c, x) => xlPut(c, x.status === 'optimal' ? x.avgUtil : null, 'pct'));
+  const anyPnl = results.some(x => x.metrics);
+  if(anyPnl) XL_METRICS.forEach(([label, key, kind]) => rowOf(label, (c, x) => xlPut(c, x.metrics ? x.metrics[key] : null, kind)));
+  else { ws.getCell(r++, 1).value = 'No daily P&L data — upload a file with a daily_pnl column for P&L figures.'; }
+  r++;
+
+  xlTitle(ws, r++, 'Peak-day margin by strategy');
+  xlHeader(ws, r++, ['strategy'].concat(results.map(x => x.label)));
+  state.strategies.forEach((s, i) => rowOf(s.name + ' (' + s.index + ' ' + s.type + ')', (c, x) => xlPut(c, x.status === 'optimal' ? x.peak[i] : null, 'money')));
+}
+
+function addAllocationSheet(wb, res, cap){
+  const ws = wb.addWorksheet(res.label, { views: [{ showGridLines: false }] });
+  ws.columns = [{ width: 26 }].concat(Array(8).fill({ width: 15 }));
+  let r = 1;
+  xlTitle(ws, r++, res.label + ' — allocation', 14);
+  if(res.status !== 'optimal'){
+    ws.getCell(r, 1).value = res.status === 'infeasible'
+      ? 'Infeasible — a floor is clashing with a ceiling under these limits. No allocation to show.'
+      : 'Unbounded — a strategy earns but uses no margin, so nothing limits its size. No allocation to show.';
+    return;
+  }
+  ws.getCell(r, 1).value = 'Objective value';
+  xlPut(ws.getCell(r, 2), res.objValue, res.objective === 'maximin' ? 'pct' : 'money');
+  r += 2;
+
+  // allocation table(s), as in "margin by strategy and day"
+  const line = { style: 'thin', color: { argb: argb(XL_COLORS.line) } };
+  allocationWeeks().forEach(([weekLabel, weekNum]) => {
+    if(weekLabel) xlTitle(ws, r++, weekLabel, 11);
+    xlHeader(ws, r++, ['strategy / metric ($)'].concat(WEEKDAYS));
+    const totals = [0, 0, 0, 0, 0];
+    state.strategies.forEach((s, i) => {
+      const dial = res.dials[i];
+      const trade = dial > 1e-9 ? tradeDayCols(s) : { sell: [], unwind: [] };
+      const expCol = expiryColFor(s, weekNum);
+      ws.getCell(r, 1).value = s.name;
+      WEEKDAYS.forEach((wd, di) => {
+        const val = unitMargin(s, slotOf(wd, weekNum)) * dial;
+        totals[di] += val;
+        const c = ws.getCell(r, di + 2);
+        xlPut(c, val, 'money');
+        c.border = { bottom: line };
+        const isSell = trade.sell.includes(di), isUnwind = trade.unwind.includes(di);
+        if(isSell || isUnwind) c.fill = XL_FILL[isSell && isUnwind ? 'both' : isSell ? 'sell' : 'unwind'];
+        if(di === expCol){
+          const edge = { style: s.type === 'monthly' ? 'thick' : 'medium', color: { argb: argb(XL_COLORS[s.index]) } };
+          c.border = { top: edge, left: edge, bottom: edge, right: edge };
+          c.font = { bold: true };
+        }
+      });
+      ws.getCell(r, 1).border = { bottom: line };
+      r++;
+    });
+    ws.getCell(r, 1).value = 'TOTAL';
+    totals.forEach((t, di) => xlPut(ws.getCell(r, di + 2), t, 'money'));
+    for(let k = 1; k <= 6; k++){ const c = ws.getCell(r, k); c.font = { bold: true }; c.fill = XL_FILL.head; c.border = { top: { style: 'medium', color: { argb: argb(XL_COLORS.line) } } }; }
+    r++;
+    ws.getCell(r, 1).value = 'UTILIZATION';
+    totals.forEach((t, di) => xlPut(ws.getCell(r, di + 2), cap > 0 ? t / cap : 0, 'pct'));
+    for(let k = 1; k <= 6; k++){ const c = ws.getCell(r, k); c.font = { bold: true }; c.fill = XL_FILL.head; }
+    ws.addConditionalFormatting({ ref: ws.getCell(r, 2).address + ':' + ws.getCell(r, 6).address,
+      rules: [{ type: 'dataBar', minLength: 0, maxLength: 100, gradient: false, color: { argb: argb(XL_COLORS.util) },
+                cfvo: [{ type: 'num', value: 0 }, { type: 'num', value: 1 }] }] });
+    r += 2;
+  });
+
+  // legend
+  [['sell day', XL_FILL.sell], ['unwind day', XL_FILL.unwind], ['sell & unwind', XL_FILL.both], ['expiry day', null]].forEach(([label, fill], k) => {
+    const c = ws.getCell(r, k + 2); c.value = label; c.alignment = { horizontal: 'center' };
+    if(fill) c.fill = fill;
+    else { const edge = { style: 'medium', color: { argb: argb(XL_COLORS.dim) } }; c.border = { top: edge, left: edge, bottom: edge, right: edge }; }
+  });
+  ws.getCell(r, 1).value = 'Key'; ws.getCell(r, 1).font = { color: { argb: argb(XL_COLORS.dim) } };
+  r += 2;
+
+  // P&L summary, as in the performance section
+  xlTitle(ws, r++, 'P&L summary');
+  if(!res.metrics){ ws.getCell(r, 1).value = 'No daily P&L data — upload a file with a daily_pnl column.'; return; }
+  const d = res.book.dates;
+  ws.getCell(r++, 1).value = d[0] + ' → ' + d[d.length - 1] + ' · ' + res.metrics.days + ' trading days · annualised on 252 days, % of total capital';
+  XL_METRICS.forEach(([label, key, kind]) => { ws.getCell(r, 1).value = label; xlPut(ws.getCell(r, 2), res.metrics[key], kind); r++; });
+  r++;
+
+  xlTitle(ws, r++, 'Per strategy');
+  xlHeader(ws, r++, ['strategy', 'peak-day margin', 'P&L scale', 'total P&L', 'share of P&L', 'Sharpe', 'Sortino', 'max drawdown', 'win rate']);
+  state.strategies.forEach((s, i) => {
+    ws.getCell(r, 1).value = s.name;
+    xlPut(ws.getCell(r, 2), res.peak[i], 'money');
+    xlPut(ws.getCell(r, 3), pnlScaleFor(s, res.dials[i]), 'ratio');
+    const why = !s.dailyPnl ? 'no P&L data' : res.dials[i] <= 0 ? 'not run' : !(num(s.margin0DTE) > 0) ? 'no margin @0DTE' : '';
+    if(why){ const c = ws.getCell(r, 4); c.value = why; c.alignment = { horizontal: 'right' }; for(let k = 5; k <= 9; k++) xlPut(ws.getCell(r, k), null); }
+    else{
+      const sm = pnlMetrics(res.book.series[i], cap);
+      xlPut(ws.getCell(r, 4), sm.total, 'money');
+      xlPut(ws.getCell(r, 5), res.metrics.total !== 0 ? sm.total / res.metrics.total : null, 'pct');
+      xlPut(ws.getCell(r, 6), sm.sharpe, 'ratio');
+      xlPut(ws.getCell(r, 7), sm.sortino, 'ratio');
+      xlPut(ws.getCell(r, 8), sm.maxDD, 'money');
+      xlPut(ws.getCell(r, 9), sm.winRate, 'pct');
+    }
+    r++;
+  });
+}
+
+document.getElementById('allocXlsxBtn').addEventListener('click', async () => {
+  const cap = num(document.getElementById('totalCapital').value);
+  if(!state.strategies.length){ showToast('No strategies yet — add some first.', true); return; }
+  if(!(cap > 0)){ showToast('Total margin capital must be greater than $0.', true); return; }
+  if(typeof ExcelJS === 'undefined'){ showToast('The Excel library didn\'t load — check your internet connection and reload.', true); return; }
+  try{
+    const results = Object.keys(OBJECTIVE_LABELS).map(o => allocationFor(o, cap));
+    const wb = new ExcelJS.Workbook();
+    wb.created = new Date();
+    addSummarySheet(wb, results, cap);
+    results.forEach(res => addAllocationSheet(wb, res, cap));
+    const buf = await wb.xlsx.writeBuffer();
+    const now = new Date(), pad = n => String(n).padStart(2, '0');
+    const fname = 'margin_allocation_' + state.marginInputMode + '_cap' + +(cap / 1e6).toFixed(2) + 'M_' +
+      now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate()) + '-' + pad(now.getHours()) + pad(now.getMinutes()) + '.xlsx';
+    const url = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    const a = document.createElement('a'); a.href = url; a.download = fname;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    showToast('Workbook downloaded: ' + fname);
+  }catch(err){ console.error(err); showToast('Could not build the workbook: ' + err.message, true); }
 });
 
 document.getElementById('addRow').addEventListener('click', ()=>{
@@ -2430,7 +2714,9 @@ function renderFormulation(){
 }
 
 // ---------- SOLVE ----------
-function buildAndSolve(){
+// `objective` defaults to the one selected on screen; the allocation workbook passes
+// each of the three in turn.
+function buildAndSolve(objective = state.objective){
   const cap = num(document.getElementById('totalCapital').value);
   const minTotal = num(document.getElementById('minTotalMargin').value);
   const slots = getSlots();
@@ -2462,7 +2748,7 @@ function buildAndSolve(){
       // changing what the model means.
       if(m !== 0) coeffs['slot_'+slot] = m;
       totalUtilCoeff += m;
-      if(state.objective === 'maximin' && m !== 0) coeffs['z_'+slot] = m;
+      if(objective === 'maximin' && m !== 0) coeffs['z_'+slot] = m;
 
       // per-strategy floor/ceiling — the floor only applies on days the strategy
       // actually has margin (m > 0), so it doesn't force a position on days its
@@ -2487,13 +2773,13 @@ function buildAndSolve(){
         }
       }
     });
-    if(state.objective === 'total') coeffs['totalUtil'] = totalUtilCoeff;
-    if(state.objective === 'riskadj') coeffs['riskObj'] = marginFactor(s) * (num(s.expectedReturn) - lambda*num(s.risk));
+    if(objective === 'total') coeffs['totalUtil'] = totalUtilCoeff;
+    if(objective === 'riskadj') coeffs['riskObj'] = marginFactor(s) * (num(s.expectedReturn) - lambda*num(s.risk));
     variables[varName] = coeffs;
   });
 
-  let optimizeName = state.objective==='total' ? 'totalUtil' : (state.objective==='maximin' ? 'z' : 'riskObj');
-  if(state.objective === 'maximin'){
+  let optimizeName = objective==='total' ? 'totalUtil' : (objective==='maximin' ? 'z' : 'riskObj');
+  if(objective === 'maximin'){
     const zCoeffs = {z:1};
     slots.forEach(slot=>{ zCoeffs['z_'+slot] = -cap; constraints['z_'+slot] = {min:0}; });
     variables['z'] = zCoeffs;
@@ -2635,7 +2921,7 @@ function setupCollapsiblePanels(){
 
 loadState();
 applyDomBackedFields();
-if(!MARGIN_MODE_BTNS[state.marginInputMode]) state.marginInputMode = 'dte';
+if(!MARGIN_MODE_BTNS[state.marginInputMode]) state.marginInputMode = 'half';
 refreshMarginModeButtons();
 render();
 refreshHorizonLock();

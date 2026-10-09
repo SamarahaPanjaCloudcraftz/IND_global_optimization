@@ -77,12 +77,6 @@ def _ranking(view: View) -> None:
                "selector's verdict: Pareto front (1 = beaten by nothing), score (lower is "
                "better), its rank, status and reason.")
     ranked = ranking.table(view.frames, view.margins, view.reference, robust=True)
-    pbo = ranked.attrs.get("PBO")
-    if pbo is not None and pd.notna(pbo):
-        st.markdown(f"**Probability of backtest overfitting (PBO) for this table: {pbo:.2f}** — "
-                    "how often the in-sample best of these variants falls to or below the "
-                    "median out of sample (0 is reliable, around 0.5 or more is no better "
-                    "than chance).")
     table, notes = ranking.selector_audit(ranked)
     for note in notes:
         st.caption(note)

@@ -146,8 +146,6 @@ def render(scope: str, roots: list[str], weekdays_of: dict[str, list[str]],
                                      if len(reference) else FORMATS[name].format(top[name]))
                     for name, form in ROBUST_FORMATS.items():
                         row[name] = "—" if pd.isna(top.get(name)) else form.format(top[name])
-                    pbo = table.attrs.get("PBO")
-                    row["Table PBO"] = "—" if pbo is None or pd.isna(pbo) else f"{pbo:.2f}"
                     rows.append(row)
                 if picked.empty:
                     row = {"Weekday": weekday, **({"#": "—"} if n > 1 else {})}

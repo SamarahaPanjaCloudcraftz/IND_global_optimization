@@ -4,8 +4,8 @@
 
 Two overfitting-aware metrics added to the per-axis, per-weekday rankings of
 `dashboards/analyse_run`: the **Deflated Sharpe Ratio (DSR)** and a
-**CSCV consistency score**, plus each table's **Probability of Backtest
-Overfitting (PBO)**. This note says what they are, the exact formulas used, how
+**CSCV consistency score**. Each table's **Probability of Backtest
+Overfitting (PBO)** is computed alongside but not shown. This note says what they are, the exact formulas used, how
 they were checked against the source papers, and where they are wired in.
 
 ## Why
@@ -21,7 +21,7 @@ holds across sub-periods.
 
 | Step | Ranked on | Selector config |
 |---|---|---|
-| Axis tables: detail view, Summary, and Combine step 1 (each axis's top n per weekday) | Final P&L, Max drawdown, Sortino, **DSR**, **CSCV**; the table's **PBO** shown | `selector/axis.toml` |
+| Axis tables: detail view, Summary, and Combine step 1 (each axis's top n per weekday) | Final P&L, Max drawdown, Sortino, **DSR**, **CSCV** | `selector/axis.toml` |
 | Combine round 1 best-of (H\*, S\*) and the final recommendation | Final P&L, Max drawdown, Sortino — **unchanged** | `selector/default.toml` |
 
 The Combine pools are left out on purpose. They hold 4–25 candidates that were
@@ -96,8 +96,8 @@ Finance, Algorithm 2.3 and §3.1.
 **PBO (the paper's output, per table)** = the share of the 20 splits with
 λ ≤ 0 — how often the in-sample winner lands at or below the out-of-sample
 median. 0 means the table's ranking carries over; around 0.5 means it is no
-better than chance. Shown above each axis table and as "Table PBO" in the
-Summary.
+better than chance. Computed for every axis table (`table.attrs["PBO"]`)
+but not shown in the dashboard.
 
 **CSCV score (per variant, our adaptation)** = the variant's average OOS
 relative rank ω over the 20 splits, in (0, 1), higher is better. The paper
@@ -144,7 +144,7 @@ of weight instead of counting that idea twice.
 | `dashboards/analyse_run/robustness.py` | the maths: `moments`, `expected_max_sharpe`, `deflated_sharpe`, `dsr_table`, `cscv`, `cscv_table` |
 | `dashboards/analyse_run/ranking.py` | `table(..., robust=True)` adds `DSR`, `CSCV`, their ranks and `attrs["PBO"]`; `ROBUST_WEIGHTS`; picks `axis.toml` for tables carrying DSR and CSCV |
 | `dashboards/analyse_run/selector/axis.toml` | selector config for the axis tables |
-| `dashboards/analyse_run/summary.py`, `panels.py`, `streamlit_app.py` | axis tables call `robust=True`; PBO and the new columns are shown |
+| `dashboards/analyse_run/summary.py`, `panels.py`, `streamlit_app.py` | axis tables call `robust=True`; DSR and CSCV are shown |
 | `dashboards/analyse_run/combination_page.py` | unchanged — Combine tables use `robust=False` and `default.toml` |
 | `dashboards/analyse_run/test_robustness.py` | tests, below |
 
